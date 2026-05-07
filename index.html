@@ -2,43 +2,41 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Riverbank 3D - Premium</title>
+    <title>Interactive Playroom - Dual Zone</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #080808; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #ffffff; font-family: sans-serif; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
         #webcam { display: none; }
         #ui {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            background: #080808; z-index: 100; color: white; text-align: center;
+            background: #ffffff; z-index: 100; color: #333; text-align: center;
         }
         button {
-            padding: 25px 60px; font-size: 24px; cursor: pointer; letter-spacing: 2px;
-            background-color: #2ecc71; color: white; border: none; border-radius: 50px;
-            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.4); transition: 0.3s;
+            padding: 20px 50px; font-size: 20px; cursor: pointer; letter-spacing: 1px;
+            background-color: #e74c3c; color: white; border: none; border-radius: 5px;
+            box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3); transition: 0.3s;
         }
-        button:hover { background-color: #27ae60; transform: scale(1.05); }
+        button:hover { background-color: #c0392b; transform: scale(1.05); }
         #log { margin-top: 20px; font-family: monospace; color: #888; }
         
-        /* GUI styling */
         .dg.ac { z-index: 50 !important; }
         body.kiosk-mode { cursor: none; }
         body.kiosk-mode .dg.ac { opacity: 0; pointer-events: none; }
     </style>
-    <!-- Load Admin Board -->
+    <!-- Admin Board -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
 </head>
 <body>
 
     <div id="ui">
-        <h1 style="letter-spacing: 5px; font-weight: 300;">RIVERBANK 3D</h1>
-        <p style="color: #aaa; margin-bottom: 30px;">Step, Kick, and Splash.</p>
-        <button onclick="startApp()">ACTIVATE SENSORS</button>
-        <div id="log">System Standing By...</div>
+        <h1 style="letter-spacing: 2px; font-weight: 300;">INTERACTIVE PLAYROOM</h1>
+        <p style="color: #666; margin-bottom: 30px;">Hold hands high to attract the sky. Kick low to play.</p>
+        <button onclick="startApp()">START EXPERIENCE</button>
+        <div id="log">Sensors Ready</div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
-    <!-- Muted is mandatory for autoplay on mobile/safari -->
     <video id="webcam" playsinline autoplay muted></video>
 
     <script>
@@ -48,35 +46,37 @@
         var ctx = canvas.getContext('2d');
 
         var objects = [];
-        var particles = [];
-        var ripples = [];
-        var fireflies = [];
+        var skyParticles = []; // The "stars"
+        var floorSplatter = []; // Paint left on the floor
         var lastFrame = null;
         var engineBooted = false;
 
+        // Gravity Wells (The hands held up in the sky)
+        var gravityWells = [];
+
         // --- CUSTOMIZABLE SETTINGS ---
         var settings = {
-            gravity: 0.4,
-            kickPower: 20,
-            ballCount: 10,
-            critterCount: 6,
-            bgColor: '#0a0f14' // Deep river blue/black
+            gravity: 0.5,
+            kickPower: 22,
+            ballCount: 8,
+            puddleCount: 4,
+            bgColor: '#f0f4f8', // Soft realistic white/grey
+            skyParticleColor: '#3498db'
         };
 
-        // --- 1. BULLETPROOF CAMERA STARTUP (UNTOUCHED) ---
+        // --- 1. CAMERA STARTUP ---
         function startApp() {
             log.innerText = "Requesting camera...";
             navigator.mediaDevices.getUserMedia({ video: true })
                 .then(function(stream) {
-                    log.innerText = "Stream acquired. Waiting for video data...";
+                    log.innerText = "Camera connected. Booting...";
                     video.srcObject = stream;
-                    video.play().catch(function(e){ log.innerText = "Autoplay blocked."; });
+                    video.play().catch(function(){});
 
                     var checkInterval = setInterval(function() {
                         if (video.readyState >= 3 && !engineBooted) { 
                             clearInterval(checkInterval);
                             engineBooted = true;
-                            log.innerText = "Video Ready. Booting Engine.";
                             document.getElementById('ui').style.opacity = '0';
                             setTimeout(function() { document.getElementById('ui').style.display = 'none'; }, 500);
                             initGame();
@@ -89,27 +89,29 @@
                 });
         }
 
-        // --- 2. GAME ENGINE ---
+        // --- 2. GAME ENGINE & ADMIN ---
         function initGame() {
             try {
                 var gui = new dat.GUI();
+                gui.addColor(settings, 'bgColor').name('Room Color');
+                gui.addColor(settings, 'skyParticleColor').name('Sky Particle Color');
                 gui.add(settings, 'kickPower', 10, 40).name('Kick Strength');
-                gui.add(settings, 'gravity', 0.1, 1.0).name('Gravity');
-                gui.add(settings, 'ballCount', 0, 30).onFinishChange(resetObjects);
-                gui.add(settings, 'critterCount', 0, 15).onFinishChange(resetObjects);
+                gui.add(settings, 'ballCount', 0, 20).onFinishChange(resetObjects);
+                gui.add(settings, 'puddleCount', 0, 10).onFinishChange(resetObjects);
             } catch(e) {}
 
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
             
-            // Create background fireflies for depth
-            for(var i=0; i<50; i++) {
-                fireflies.push({
+            // Create "Sky Particles" (Stars/Leaves/Dust)
+            for(var i=0; i<150; i++) {
+                skyParticles.push({
                     x: Math.random() * window.innerWidth,
                     y: Math.random() * window.innerHeight,
-                    size: Math.random() * 2 + 1,
-                    speed: Math.random() * 0.5 + 0.1,
-                    angle: Math.random() * Math.PI * 2
+                    size: Math.random() * 4 + 2,
+                    vx: (Math.random() - 0.5),
+                    vy: (Math.random() - 0.5),
+                    baseSpeed: Math.random() * 0.5 + 0.1
                 });
             }
 
@@ -121,7 +123,7 @@
         function resetObjects() {
             objects = [];
             for (var i = 0; i < settings.ballCount; i++) objects.push(createObject('ball'));
-            for (var i = 0; i < settings.critterCount; i++) objects.push(createObject('critter'));
+            for (var i = 0; i < settings.puddleCount; i++) objects.push(createObject('puddle'));
         }
 
         function createObject(type) {
@@ -131,22 +133,20 @@
                 x: Math.random() * canvas.width,
                 y: floor - 20,
                 z: 0,
-                radius: type === 'ball' ? Math.random() * 20 + 30 : 15,
-                vx: (Math.random() - 0.5) * 2,
-                vy: 0,
-                vz: 0,
-                color: type === 'ball' ? 'hsl(' + Math.floor(Math.random() * 360) + ', 80%, 50%)' : '#2ecc71',
+                radius: type === 'ball' ? Math.random() * 25 + 35 : 30, // Puddles are flat
+                vx: (Math.random() - 0.5) * 3,
+                vy: 0, vz: 0,
+                colorHue: Math.floor(Math.random() * 360), // Store hue for realistic shading
                 growth: 0.1,
-                wanderTimer: 0 // For critter AI
+                isSquished: false
             };
         }
 
-        // --- 3. MOTION TRACKING (UNTOUCHED LOGIC) ---
+        // --- 3. DUAL-ZONE MOTION TRACKING ---
         function trackMotion() {
             var mCanvas = document.createElement('canvas');
             var mCtx = mCanvas.getContext('2d', { willReadFrequently: true });
-            mCanvas.width = 64;
-            mCanvas.height = 48;
+            mCanvas.width = 64; mCanvas.height = 48;
 
             function scan() {
                 if (video.readyState < 3) { setTimeout(scan, 100); return; }
@@ -154,31 +154,48 @@
                 mCtx.drawImage(video, 0, 0, 64, 48);
                 var current = mCtx.getImageData(0, 0, 64, 48).data;
                 
+                gravityWells = []; // Reset hand attractors every frame
+
                 if (lastFrame) {
                     for (var i = 0; i < current.length; i += 4) {
-                        var yPerc = (Math.floor(i / 4 / 64)) / 48;
-                        if (yPerc > 0.7) { // Ground level tracking
-                            if (Math.abs(current[i] - lastFrame[i]) > 40) {
-                                var x = (1.0 - ((i / 4) % 64) / 64) * canvas.width;
-                                var y = yPerc * canvas.height;
-                                
-                                // Randomly create water ripples when kids step
-                                if (Math.random() > 0.95) createRipple(x);
-
+                        if (Math.abs(current[i] - lastFrame[i]) > 40) { // Motion detected
+                            var x = (1.0 - ((i / 4) % 64) / 64) * canvas.width;
+                            var yPerc = (Math.floor(i / 4 / 64)) / 48;
+                            var y = yPerc * canvas.height;
+                            
+                            // ZONE 1: THE SKY (Top 60% of screen)
+                            if (yPerc < 0.6) {
+                                // If a kid waves high, create a gravity well
+                                // We push it if it's new, or average it if it's close to an existing one
+                                var added = false;
+                                for (var w=0; w<gravityWells.length; w++) {
+                                    var dist = Math.abs(gravityWells[w].x - x);
+                                    if (dist < 100) {
+                                        gravityWells[w].power += 0.1; // Make attraction stronger
+                                        added = true; break;
+                                    }
+                                }
+                                if (!added && gravityWells.length < 3) { // Max 3 hands tracked
+                                    gravityWells.push({x: x, y: y, power: 1.0});
+                                }
+                            }
+                            
+                            // ZONE 2: THE FLOOR (Bottom 30% of screen)
+                            if (yPerc > 0.7) {
                                 objects.forEach(function(obj) {
                                     var dx = obj.x - x;
                                     var dy = obj.y - y;
-                                    if (Math.sqrt(dx * dx + dy * dy) < obj.radius + 50) {
+                                    if (Math.sqrt(dx * dx + dy * dy) < obj.radius + 60) {
                                         if (obj.type === 'ball') {
-                                            obj.vz = 0.04;
+                                            obj.vz = 0.06; // Kick deep
                                             obj.vy = -settings.kickPower * 0.6;
                                             obj.vx = (obj.x - x) * 0.4;
-                                        } else {
-                                            // Critter flees
-                                            obj.vx = (obj.x - x) * 1.5;
-                                            obj.vy = -6;
+                                        } else if (obj.type === 'puddle' && !obj.isSquished) {
+                                            // Step on a paint puddle
+                                            obj.isSquished = true;
+                                            obj.vx = 0; obj.vy = 0;
+                                            createFloorSplatter(obj.x, obj.y, obj.colorHue);
                                         }
-                                        createSplatter(obj.x, obj.y, obj.color);
                                     }
                                 });
                             }
@@ -186,162 +203,163 @@
                     }
                 }
                 lastFrame = new Uint8ClampedArray(current);
-                setTimeout(scan, 50); // 20 fps scanning
+                setTimeout(scan, 50);
             }
             scan();
         }
 
         // --- 4. VISUAL EFFECTS ---
-        function createSplatter(x, y, color) {
-            for (var i = 0; i < 8; i++) {
-                particles.push({
-                    x: x, y: y,
-                    vx: (Math.random() - 0.5) * 12,
-                    vy: (Math.random() - 0.5) * 12,
-                    size: Math.random() * 6 + 2,
-                    alpha: 1.0,
-                    color: color
+        function createFloorSplatter(x, y, hue) {
+            for (var i = 0; i < 5; i++) {
+                floorSplatter.push({
+                    x: x + (Math.random() - 0.5) * 60,
+                    y: y + (Math.random() - 0.5) * 20,
+                    radius: Math.random() * 15 + 5,
+                    color: 'hsla(' + hue + ', 80%, 50%, 0.8)',
+                    life: 1.0 // Slowly fades into the white floor
                 });
             }
-        }
-
-        function createRipple(x) {
-            ripples.push({
-                x: x,
-                y: canvas.height * 0.85, // Floor line
-                radius: 10,
-                alpha: 0.6
-            });
         }
 
         // --- 5. MAIN RENDER LOOP ---
         function gameLoop() {
             requestAnimationFrame(gameLoop);
             
-            // Draw Background
+            // Draw Realistic Room Background
             ctx.fillStyle = settings.bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Draw Fireflies (Parallax Background)
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-            fireflies.forEach(function(f) {
-                f.x += Math.cos(f.angle) * f.speed;
-                f.y += Math.sin(f.angle) * f.speed;
-                if (Math.random() > 0.98) f.angle += (Math.random() - 0.5); // Wander
-                
-                // Wrap around screen
-                if (f.x < 0) f.x = canvas.width;
-                if (f.x > canvas.width) f.x = 0;
-                if (f.y < 0) f.y = canvas.height;
-                if (f.y > canvas.height) f.y = 0;
-
-                ctx.beginPath();
-                ctx.arc(f.x, f.y, f.size, 0, Math.PI * 2);
-                ctx.fill();
-            });
+            // Draw a subtle "horizon/wall" gradient
+            var grd = ctx.createLinearGradient(0, canvas.height*0.85, 0, 0);
+            grd.addColorStop(0, "rgba(0,0,0,0.05)");
+            grd.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = grd;
+            ctx.fillRect(0, 0, canvas.width, canvas.height*0.85);
 
             var floorY = canvas.height * 0.85;
 
-            // Draw Water Ripples on Floor
-            for (var i = ripples.length - 1; i >= 0; i--) {
-                var r = ripples[i];
-                r.radius += 2;
-                r.alpha -= 0.02;
-                if (r.alpha <= 0) {
-                    ripples.splice(i, 1);
-                } else {
-                    ctx.strokeStyle = 'rgba(0, 200, 255, ' + r.alpha + ')';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    // Draw oval for perspective
-                    ctx.ellipse(r.x, r.y, r.radius, r.radius * 0.3, 0, 0, Math.PI * 2);
-                    ctx.stroke();
-                }
-            }
-
-            // Draw Floor Line
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(0, floorY);
-            ctx.lineTo(canvas.width, floorY);
-            ctx.stroke();
-
-            // Draw Particles (Splatter)
-            for (var i = particles.length - 1; i >= 0; i--) {
-                var p = particles[i];
-                p.vy += 0.2; // Gravity for particles
-                p.x += p.vx; 
-                p.y += p.vy; 
-                p.alpha -= 0.03;
+            // Update & Draw Sky Particles (The Stars)
+            ctx.fillStyle = settings.skyParticleColor;
+            skyParticles.forEach(function(p) {
+                // Default drifting
+                p.x += p.vx * p.baseSpeed;
+                p.y += p.vy * p.baseSpeed;
                 
-                if (p.alpha <= 0) particles.splice(i, 1);
+                // GRAVITY WELL ATTRACTION (If hands are up)
+                if (gravityWells.length > 0) {
+                    var closestWell = gravityWells[0];
+                    var shortestDist = 9999;
+                    gravityWells.forEach(function(w) {
+                        var d = Math.sqrt(Math.pow(w.x - p.x, 2) + Math.pow(w.y - p.y, 2));
+                        if (d < shortestDist) { shortestDist = d; closestWell = w; }
+                    });
+
+                    // Pull toward hand
+                    if (shortestDist < 400) {
+                        p.vx += (closestWell.x - p.x) * 0.002 * closestWell.power;
+                        p.vy += (closestWell.y - p.y) * 0.002 * closestWell.power;
+                    }
+                } else {
+                    // Friction to return to slow drift
+                    p.vx *= 0.95; p.vy *= 0.95;
+                    p.vx += (Math.random() - 0.5) * 0.1;
+                    p.vy += (Math.random() - 0.5) * 0.1;
+                }
+
+                // Wrap around screen
+                if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
+                if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Draw Floor Splatters
+            for (var i = floorSplatter.length - 1; i >= 0; i--) {
+                var s = floorSplatter[i];
+                s.life -= 0.002; // Fades out slowly
+                if (s.life <= 0) floorSplatter.splice(i, 1);
                 else {
-                    ctx.globalAlpha = p.alpha;
-                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = s.life;
+                    ctx.fillStyle = s.color;
                     ctx.beginPath();
-                    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+                    // Squished oval shape
+                    ctx.ellipse(s.x, floorY + (s.y - floorY)*0.3, s.radius, s.radius * 0.3, 0, 0, Math.PI * 2);
                     ctx.fill();
                 }
             }
             ctx.globalAlpha = 1.0;
 
-            // Update & Draw Objects
+            // Draw Floor Line
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, floorY); ctx.lineTo(canvas.width, floorY); ctx.stroke();
+
+            // Update & Draw Objects (Balls and Puddles)
             for (var i = 0; i < objects.length; i++) {
                 var o = objects[i];
-                if (o.growth < 1.0) o.growth += 0.05; // Spawning bubble effect
-
-                // Critter AI (Wandering)
-                if (o.type === 'critter' && o.z === 0 && o.y >= floorY - o.radius) {
-                    o.wanderTimer++;
-                    if (o.wanderTimer > 60) {
-                        o.vx = (Math.random() - 0.5) * 6; // Dart left or right
-                        o.wanderTimer = 0;
-                    }
-                    o.vx *= 0.95; // Friction
-                }
-
-                // Physics
-                o.z += o.vz; 
-                o.x += o.vx; 
-                o.y += o.vy; 
-                o.vy += settings.gravity;
                 
-                // 3D Perspective Scaling
-                var scale = 1.0 - (o.z * 0.8);
-                var currentRadius = o.radius * scale * o.growth;
+                if (o.growth < 1.0 && !o.isSquished) o.growth += 0.05;
 
-                // Floor Collision
-                if (o.y + currentRadius > floorY) {
-                    o.y = floorY - currentRadius;
-                    o.vy *= -0.6; // Bounce
-                    o.vz *= 0.8;  // Friction on Z axis
-                    if (o.type === 'ball' && Math.abs(o.vy) > 2) createRipple(o.x); // Splash when landing
+                // Physics (Balls only)
+                if (o.type === 'ball') {
+                    o.z += o.vz; o.x += o.vx; o.y += o.vy; o.vy += settings.gravity;
+                    var scale = 1.0 - (o.z * 0.8);
+                    var currentRadius = o.radius * scale * o.growth;
+
+                    // Bounce
+                    if (o.y + currentRadius > floorY) {
+                        o.y = floorY - currentRadius;
+                        o.vy *= -0.65; o.vz *= 0.8;
+                    }
+
+                    // Respawn
+                    if (o.z > 0.95 || o.x < -100 || o.x > canvas.width + 100) {
+                        objects[i] = createObject('ball');
+                        objects[i].growth = 0;
+                    }
+
+                    // Realistic Ball Shadow
+                    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+                    ctx.beginPath();
+                    var shadowScale = 1.0 - Math.min((floorY - o.y) / 200, 0.8); // Shadow gets smaller when ball is high
+                    ctx.ellipse(o.x, floorY + 10, currentRadius * shadowScale, currentRadius * 0.2 * shadowScale, 0, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Realistic 3D Ball Rendering (Radial Gradient)
+                    var ballGrd = ctx.createRadialGradient(
+                        o.x - currentRadius * 0.3, o.y - currentRadius * 0.3, currentRadius * 0.1, // Highlight source
+                        o.x, o.y, currentRadius // Shadow edge
+                    );
+                    ballGrd.addColorStop(0, 'hsl(' + o.colorHue + ', 80%, 80%)'); // Light spot
+                    ballGrd.addColorStop(0.7, 'hsl(' + o.colorHue + ', 80%, 50%)'); // Main color
+                    ballGrd.addColorStop(1, 'hsl(' + o.colorHue + ', 80%, 30%)'); // Dark edge
+
+                    ctx.beginPath();
+                    ctx.arc(o.x, o.y, currentRadius, 0, Math.PI * 2);
+                    ctx.fillStyle = ballGrd;
+                    ctx.fill();
+                } 
+                // Puddle rendering
+                else if (o.type === 'puddle') {
+                    if (o.isSquished) {
+                        o.radius -= 1; // Shrink away
+                        if (o.radius <= 0) objects[i] = createObject('puddle');
+                    } else {
+                        // Un-squished puddle shadow
+                        ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                        ctx.beginPath();
+                        ctx.ellipse(o.x, floorY, o.radius * o.growth, o.radius * o.growth * 0.3, 0, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Puddle color
+                        ctx.fillStyle = 'hsla(' + o.colorHue + ', 80%, 50%, 0.8)';
+                        ctx.beginPath();
+                        ctx.ellipse(o.x, floorY - 2, o.radius * o.growth, o.radius * o.growth * 0.3, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
                 }
-
-                // Respawn if thrown deep into screen or off edges
-                if (o.z > 0.95 || o.x < -100 || o.x > canvas.width + 100) {
-                    objects[i] = createObject(o.type);
-                    objects[i].growth = 0;
-                }
-
-                // Draw Shadow
-                ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                ctx.beginPath();
-                ctx.ellipse(o.x, floorY, currentRadius, currentRadius * 0.3, 0, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Draw Object
-                ctx.beginPath();
-                ctx.arc(o.x, o.y, currentRadius, 0, Math.PI * 2);
-                ctx.fillStyle = o.color;
-                ctx.fill();
-
-                // Draw 3D Shine
-                ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                ctx.beginPath();
-                ctx.arc(o.x - currentRadius * 0.3, o.y - currentRadius * 0.3, currentRadius * 0.2, 0, Math.PI * 2);
-                ctx.fill();
             }
         }
 
@@ -350,7 +368,6 @@
             canvas.height = window.innerHeight;
         }
 
-        // Kiosk Mode Toggle
         document.addEventListener('keydown', function(e) {
             if (e.key.toLowerCase() === 'f') {
                 if (!document.fullscreenElement) {
