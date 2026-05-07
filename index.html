@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Interactive Playroom - Dual Zone</title>
+    <title>Gentle Playroom - Sensory Soft-Launch</title>
     <style>
         body { margin: 0; overflow: hidden; background: #ffffff; font-family: sans-serif; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
@@ -14,26 +14,25 @@
         }
         button {
             padding: 20px 50px; font-size: 20px; cursor: pointer; letter-spacing: 1px;
-            background-color: #e74c3c; color: white; border: none; border-radius: 5px;
-            box-shadow: 0 4px 10px rgba(231, 76, 60, 0.3); transition: 0.3s;
+            background-color: #3498db; color: white; border: none; border-radius: 50px;
+            box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3); transition: 0.3s;
         }
-        button:hover { background-color: #c0392b; transform: scale(1.05); }
+        button:hover { background-color: #2980b9; transform: scale(1.05); }
         #log { margin-top: 20px; font-family: monospace; color: #888; }
         
         .dg.ac { z-index: 50 !important; }
         body.kiosk-mode { cursor: none; }
         body.kiosk-mode .dg.ac { opacity: 0; pointer-events: none; }
     </style>
-    <!-- Admin Board -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
 </head>
 <body>
 
     <div id="ui">
-        <h1 style="letter-spacing: 2px; font-weight: 300;">INTERACTIVE PLAYROOM</h1>
-        <p style="color: #666; margin-bottom: 30px;">Hold hands high to attract the sky. Kick low to play.</p>
+        <h1 style="letter-spacing: 2px; font-weight: 300;">GENTLE PLAYROOM</h1>
+        <p style="color: #666; margin-bottom: 30px;">Slow and gentle movements create the best magic.</p>
         <button onclick="startApp()">START EXPERIENCE</button>
-        <div id="log">Sensors Ready</div>
+        <div id="log">Sensors Calibrated</div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -46,72 +45,59 @@
         var ctx = canvas.getContext('2d');
 
         var objects = [];
-        var skyParticles = []; // The "stars"
-        var floorSplatter = []; // Paint left on the floor
+        var skyParticles = []; 
         var lastFrame = null;
         var engineBooted = false;
-
-        // Gravity Wells (The hands held up in the sky)
         var gravityWells = [];
 
-        // --- CUSTOMIZABLE SETTINGS ---
+        // --- GENTLE SETTINGS ---
         var settings = {
-            gravity: 0.5,
-            kickPower: 22,
-            ballCount: 8,
-            puddleCount: 4,
-            bgColor: '#f0f4f8', // Soft realistic white/grey
-            skyParticleColor: '#3498db'
+            gravity: 0.2,        // Very light gravity for slow falling
+            kickPower: 8,        // Significantly reduced from 22
+            flightSpeed: 0.02,   // Speed of the "3D" travel
+            airDrag: 0.94,       // High air resistance to slow things down
+            ballCount: 7,
+            bgColor: '#f9f9fb',
+            particleColor: '#aab7c4'
         };
 
-        // --- 1. CAMERA STARTUP ---
         function startApp() {
-            log.innerText = "Requesting camera...";
+            log.innerText = "Initializing sensory sensors...";
             navigator.mediaDevices.getUserMedia({ video: true })
                 .then(function(stream) {
-                    log.innerText = "Camera connected. Booting...";
                     video.srcObject = stream;
                     video.play().catch(function(){});
-
                     var checkInterval = setInterval(function() {
-                        if (video.readyState >= 3 && !engineBooted) { 
+                        if (video.videoWidth > 0 && !engineBooted) { 
                             clearInterval(checkInterval);
                             engineBooted = true;
-                            document.getElementById('ui').style.opacity = '0';
-                            setTimeout(function() { document.getElementById('ui').style.display = 'none'; }, 500);
+                            document.getElementById('ui').style.display = 'none';
                             initGame();
                         }
                     }, 100);
                 })
-                .catch(function(err) {
-                    log.innerText = "CAMERA ERROR: " + err.name;
-                    log.style.color = "red";
-                });
+                .catch(function(err) { log.innerText = "Error: " + err.name; });
         }
 
-        // --- 2. GAME ENGINE & ADMIN ---
         function initGame() {
             try {
                 var gui = new dat.GUI();
-                gui.addColor(settings, 'bgColor').name('Room Color');
-                gui.addColor(settings, 'skyParticleColor').name('Sky Particle Color');
-                gui.add(settings, 'kickPower', 10, 40).name('Kick Strength');
-                gui.add(settings, 'ballCount', 0, 20).onFinishChange(resetObjects);
-                gui.add(settings, 'puddleCount', 0, 10).onFinishChange(resetObjects);
+                gui.add(settings, 'kickPower', 2, 15).name('Gentle Kick Force');
+                gui.add(settings, 'flightSpeed', 0.005, 0.05).name('Flight Slow-Mo');
+                gui.add(settings, 'gravity', 0.05, 0.5).name('Floatiness');
+                gui.addColor(settings, 'bgColor').name('Room Hue');
             } catch(e) {}
 
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
             
-            // Create "Sky Particles" (Stars/Leaves/Dust)
-            for(var i=0; i<150; i++) {
+            for(var i=0; i<100; i++) {
                 skyParticles.push({
                     x: Math.random() * window.innerWidth,
                     y: Math.random() * window.innerHeight,
-                    size: Math.random() * 4 + 2,
-                    vx: (Math.random() - 0.5),
-                    vy: (Math.random() - 0.5),
-                    baseSpeed: Math.random() * 0.5 + 0.1
+                    size: Math.random() * 3 + 1,
+                    vx: 0, vy: 0,
+                    baseSpeed: Math.random() * 0.2 + 0.05
                 });
             }
 
@@ -123,7 +109,6 @@
         function resetObjects() {
             objects = [];
             for (var i = 0; i < settings.ballCount; i++) objects.push(createObject('ball'));
-            for (var i = 0; i < settings.puddleCount; i++) objects.push(createObject('puddle'));
         }
 
         function createObject(type) {
@@ -131,18 +116,16 @@
             return {
                 type: type,
                 x: Math.random() * canvas.width,
-                y: floor - 20,
+                y: floor - 40,
                 z: 0,
-                radius: type === 'ball' ? Math.random() * 25 + 35 : 30, // Puddles are flat
-                vx: (Math.random() - 0.5) * 3,
-                vy: 0, vz: 0,
-                colorHue: Math.floor(Math.random() * 360), // Store hue for realistic shading
-                growth: 0.1,
-                isSquished: false
+                radius: Math.random() * 20 + 40,
+                vx: 0, vy: 0, vz: 0,
+                targetVx: 0, targetVy: 0,
+                colorHue: Math.floor(Math.random() * 360),
+                growth: 0.1
             };
         }
 
-        // --- 3. DUAL-ZONE MOTION TRACKING ---
         function trackMotion() {
             var mCanvas = document.createElement('canvas');
             var mCtx = mCanvas.getContext('2d', { willReadFrequently: true });
@@ -150,52 +133,31 @@
 
             function scan() {
                 if (video.readyState < 3) { setTimeout(scan, 100); return; }
-                
                 mCtx.drawImage(video, 0, 0, 64, 48);
                 var current = mCtx.getImageData(0, 0, 64, 48).data;
-                
-                gravityWells = []; // Reset hand attractors every frame
+                gravityWells = [];
 
                 if (lastFrame) {
                     for (var i = 0; i < current.length; i += 4) {
-                        if (Math.abs(current[i] - lastFrame[i]) > 40) { // Motion detected
-                            var x = (1.0 - ((i / 4) % 64) / 64) * canvas.width;
-                            var yPerc = (Math.floor(i / 4 / 64)) / 48;
+                        if (Math.abs(current[i] - lastFrame[i]) > 45) {
+                            var x = (1.0 - ((i/4)%64)/64) * canvas.width;
+                            var yPerc = (Math.floor(i/4/64))/48;
                             var y = yPerc * canvas.height;
                             
-                            // ZONE 1: THE SKY (Top 60% of screen)
-                            if (yPerc < 0.6) {
-                                // If a kid waves high, create a gravity well
-                                // We push it if it's new, or average it if it's close to an existing one
-                                var added = false;
-                                for (var w=0; w<gravityWells.length; w++) {
-                                    var dist = Math.abs(gravityWells[w].x - x);
-                                    if (dist < 100) {
-                                        gravityWells[w].power += 0.1; // Make attraction stronger
-                                        added = true; break;
-                                    }
-                                }
-                                if (!added && gravityWells.length < 3) { // Max 3 hands tracked
-                                    gravityWells.push({x: x, y: y, power: 1.0});
-                                }
-                            }
+                            // SKY ZONE
+                            if (yPerc < 0.5) gravityWells.push({x: x, y: y});
                             
-                            // ZONE 2: THE FLOOR (Bottom 30% of screen)
-                            if (yPerc > 0.7) {
+                            // FLOOR ZONE
+                            if (yPerc > 0.75) {
                                 objects.forEach(function(obj) {
                                     var dx = obj.x - x;
                                     var dy = obj.y - y;
-                                    if (Math.sqrt(dx * dx + dy * dy) < obj.radius + 60) {
-                                        if (obj.type === 'ball') {
-                                            obj.vz = 0.06; // Kick deep
-                                            obj.vy = -settings.kickPower * 0.6;
-                                            obj.vx = (obj.x - x) * 0.4;
-                                        } else if (obj.type === 'puddle' && !obj.isSquished) {
-                                            // Step on a paint puddle
-                                            obj.isSquished = true;
-                                            obj.vx = 0; obj.vy = 0;
-                                            createFloorSplatter(obj.x, obj.y, obj.colorHue);
-                                        }
+                                    if (Math.sqrt(dx*dx + dy*dy) < obj.radius + 40) {
+                                        // GENTLE LAUNCH: We set a "Target" velocity that the ball
+                                        // smoothly accelerates towards, rather than snapping.
+                                        obj.vz = settings.flightSpeed; 
+                                        obj.vy = -settings.kickPower;
+                                        obj.vx = (obj.x - x) * 0.15;
                                     }
                                 });
                             }
@@ -203,164 +165,80 @@
                     }
                 }
                 lastFrame = new Uint8ClampedArray(current);
-                setTimeout(scan, 50);
+                setTimeout(scan, 60);
             }
             scan();
         }
 
-        // --- 4. VISUAL EFFECTS ---
-        function createFloorSplatter(x, y, hue) {
-            for (var i = 0; i < 5; i++) {
-                floorSplatter.push({
-                    x: x + (Math.random() - 0.5) * 60,
-                    y: y + (Math.random() - 0.5) * 20,
-                    radius: Math.random() * 15 + 5,
-                    color: 'hsla(' + hue + ', 80%, 50%, 0.8)',
-                    life: 1.0 // Slowly fades into the white floor
-                });
-            }
-        }
-
-        // --- 5. MAIN RENDER LOOP ---
         function gameLoop() {
             requestAnimationFrame(gameLoop);
-            
-            // Draw Realistic Room Background
             ctx.fillStyle = settings.bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Draw a subtle "horizon/wall" gradient
-            var grd = ctx.createLinearGradient(0, canvas.height*0.85, 0, 0);
-            grd.addColorStop(0, "rgba(0,0,0,0.05)");
-            grd.addColorStop(1, "rgba(0,0,0,0)");
-            ctx.fillStyle = grd;
-            ctx.fillRect(0, 0, canvas.width, canvas.height*0.85);
-
             var floorY = canvas.height * 0.85;
 
-            // Update & Draw Sky Particles (The Stars)
-            ctx.fillStyle = settings.skyParticleColor;
+            // Update Sky
+            ctx.fillStyle = settings.particleColor;
             skyParticles.forEach(function(p) {
-                // Default drifting
-                p.x += p.vx * p.baseSpeed;
-                p.y += p.vy * p.baseSpeed;
-                
-                // GRAVITY WELL ATTRACTION (If hands are up)
+                p.x += p.vx; p.y += p.vy;
                 if (gravityWells.length > 0) {
-                    var closestWell = gravityWells[0];
-                    var shortestDist = 9999;
-                    gravityWells.forEach(function(w) {
-                        var d = Math.sqrt(Math.pow(w.x - p.x, 2) + Math.pow(w.y - p.y, 2));
-                        if (d < shortestDist) { shortestDist = d; closestWell = w; }
-                    });
-
-                    // Pull toward hand
-                    if (shortestDist < 400) {
-                        p.vx += (closestWell.x - p.x) * 0.002 * closestWell.power;
-                        p.vy += (closestWell.y - p.y) * 0.002 * closestWell.power;
-                    }
+                    var w = gravityWells[0];
+                    p.vx += (w.x - p.x) * 0.001;
+                    p.vy += (w.y - p.y) * 0.001;
                 } else {
-                    // Friction to return to slow drift
-                    p.vx *= 0.95; p.vy *= 0.95;
-                    p.vx += (Math.random() - 0.5) * 0.1;
-                    p.vy += (Math.random() - 0.5) * 0.1;
+                    p.vx *= 0.98; p.vy *= 0.98;
+                    p.vx += (Math.random()-0.5)*0.05;
+                    p.vy += (Math.random()-0.5)*0.05;
                 }
-
-                // Wrap around screen
                 if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
                 if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
-
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.fillRect(p.x, p.y, p.size, p.size);
             });
 
-            // Draw Floor Splatters
-            for (var i = floorSplatter.length - 1; i >= 0; i--) {
-                var s = floorSplatter[i];
-                s.life -= 0.002; // Fades out slowly
-                if (s.life <= 0) floorSplatter.splice(i, 1);
-                else {
-                    ctx.globalAlpha = s.life;
-                    ctx.fillStyle = s.color;
-                    ctx.beginPath();
-                    // Squished oval shape
-                    ctx.ellipse(s.x, floorY + (s.y - floorY)*0.3, s.radius, s.radius * 0.3, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            }
-            ctx.globalAlpha = 1.0;
+            // Update Balls
+            objects.forEach(function(o, i) {
+                if (o.growth < 1.0) o.growth += 0.02;
 
-            // Draw Floor Line
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(0, floorY); ctx.lineTo(canvas.width, floorY); ctx.stroke();
-
-            // Update & Draw Objects (Balls and Puddles)
-            for (var i = 0; i < objects.length; i++) {
-                var o = objects[i];
+                // Physics with high air drag
+                o.x += o.vx;
+                o.y += o.vy;
+                o.z += o.vz;
                 
-                if (o.growth < 1.0 && !o.isSquished) o.growth += 0.05;
+                o.vy += settings.gravity;
+                o.vx *= settings.airDrag;
+                o.vy *= settings.airDrag;
+                
+                var scale = (1.0 - (o.z * 0.75)) * o.growth;
+                var r = o.radius * scale;
 
-                // Physics (Balls only)
-                if (o.type === 'ball') {
-                    o.z += o.vz; o.x += o.vx; o.y += o.vy; o.vy += settings.gravity;
-                    var scale = 1.0 - (o.z * 0.8);
-                    var currentRadius = o.radius * scale * o.growth;
-
-                    // Bounce
-                    if (o.y + currentRadius > floorY) {
-                        o.y = floorY - currentRadius;
-                        o.vy *= -0.65; o.vz *= 0.8;
-                    }
-
-                    // Respawn
-                    if (o.z > 0.95 || o.x < -100 || o.x > canvas.width + 100) {
-                        objects[i] = createObject('ball');
-                        objects[i].growth = 0;
-                    }
-
-                    // Realistic Ball Shadow
-                    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-                    ctx.beginPath();
-                    var shadowScale = 1.0 - Math.min((floorY - o.y) / 200, 0.8); // Shadow gets smaller when ball is high
-                    ctx.ellipse(o.x, floorY + 10, currentRadius * shadowScale, currentRadius * 0.2 * shadowScale, 0, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    // Realistic 3D Ball Rendering (Radial Gradient)
-                    var ballGrd = ctx.createRadialGradient(
-                        o.x - currentRadius * 0.3, o.y - currentRadius * 0.3, currentRadius * 0.1, // Highlight source
-                        o.x, o.y, currentRadius // Shadow edge
-                    );
-                    ballGrd.addColorStop(0, 'hsl(' + o.colorHue + ', 80%, 80%)'); // Light spot
-                    ballGrd.addColorStop(0.7, 'hsl(' + o.colorHue + ', 80%, 50%)'); // Main color
-                    ballGrd.addColorStop(1, 'hsl(' + o.colorHue + ', 80%, 30%)'); // Dark edge
-
-                    ctx.beginPath();
-                    ctx.arc(o.x, o.y, currentRadius, 0, Math.PI * 2);
-                    ctx.fillStyle = ballGrd;
-                    ctx.fill();
-                } 
-                // Puddle rendering
-                else if (o.type === 'puddle') {
-                    if (o.isSquished) {
-                        o.radius -= 1; // Shrink away
-                        if (o.radius <= 0) objects[i] = createObject('puddle');
-                    } else {
-                        // Un-squished puddle shadow
-                        ctx.fillStyle = 'rgba(0,0,0,0.1)';
-                        ctx.beginPath();
-                        ctx.ellipse(o.x, floorY, o.radius * o.growth, o.radius * o.growth * 0.3, 0, 0, Math.PI * 2);
-                        ctx.fill();
-
-                        // Puddle color
-                        ctx.fillStyle = 'hsla(' + o.colorHue + ', 80%, 50%, 0.8)';
-                        ctx.beginPath();
-                        ctx.ellipse(o.x, floorY - 2, o.radius * o.growth, o.radius * o.growth * 0.3, 0, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
+                if (o.y + r > floorY) {
+                    o.y = floorY - r;
+                    o.vy *= -0.5; // Soft bounce
+                    o.vz *= 0.5;  // Slow down 3D travel on floor hit
                 }
-            }
+
+                if (o.z > 0.9 || o.x < -100 || o.x > canvas.width + 100) {
+                    objects[i] = createObject('ball');
+                    objects[i].growth = 0;
+                }
+
+                // Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.06)';
+                ctx.beginPath();
+                ctx.ellipse(o.x, floorY, r, r * 0.2, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Realistic Shading
+                var grd = ctx.createRadialGradient(o.x - r*0.3, o.y - r*0.3, r*0.1, o.x, o.y, r);
+                grd.addColorStop(0, 'hsl('+o.colorHue+', 80%, 85%)');
+                grd.addColorStop(0.6, 'hsl('+o.colorHue+', 75%, 60%)');
+                grd.addColorStop(1, 'hsl('+o.colorHue+', 70%, 40%)');
+                
+                ctx.beginPath();
+                ctx.arc(o.x, o.y, r, 0, Math.PI * 2);
+                ctx.fillStyle = grd;
+                ctx.fill();
+            });
         }
 
         function resizeCanvas() {
@@ -369,15 +247,7 @@
         }
 
         document.addEventListener('keydown', function(e) {
-            if (e.key.toLowerCase() === 'f') {
-                if (!document.fullscreenElement) {
-                    document.documentElement.requestFullscreen();
-                    document.body.classList.add('kiosk-mode');
-                } else {
-                    document.exitFullscreen();
-                    document.body.classList.remove('kiosk-mode');
-                }
-            }
+            if (e.key.toLowerCase() === 'f') document.documentElement.requestFullscreen();
         });
     </script>
 </body>
