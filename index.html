@@ -2,213 +2,253 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sensory Ball Pit</title>
+    <title>Pro Sensory Floor</title>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; background-color: #222; font-family: Arial, sans-serif; }
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        body.kiosk-mode { cursor: none; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
         #webcam { display: none; }
-        
-        #ui-layer {
+        #ui {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            background-color: #222; z-index: 10; color: white;
+            background: #1a1a1a; z-index: 10; color: white;
         }
-        
         button {
             padding: 20px 40px; font-size: 24px; cursor: pointer;
-            background-color: #e74c3c; color: white; border: none; border-radius: 8px;
-            font-weight: bold; margin-bottom: 20px;
+            background-color: #27ae60; color: white; border: none; border-radius: 8px;
         }
-        
-        #log {
-            width: 80%; max-width: 600px; height: 150px; background-color: #000;
-            color: #0f0; font-family: monospace; padding: 15px; border-radius: 4px;
-            overflow-y: auto; text-align: left;
-        }
+        #log { margin-top: 20px; color: #777; }
+        .dg.ac { z-index: 50 !important; transition: opacity 0.3s; }
+        body.kiosk-mode .dg.ac { opacity: 0; pointer-events: none; }
     </style>
+    <!-- DAT.GUI for the Admin Dashboard -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
 </head>
 <body>
 
-    <div id="ui-layer">
-        <h1 style="margin-bottom: 5px;">SENSORY BALL PIT</h1>
-        <p style="margin-bottom: 30px; color: #aaa;">Kick the balls at the bottom of the screen.</p>
-        
-        <!-- We use an inline onclick to guarantee the function is called -->
+    <div id="ui">
+        <h1>PRO SENSORY FLOOR</h1>
+        <p>Press 'F' after starting for Fullscreen Kiosk Mode</p>
         <button onclick="startApp()">START CAMERA</button>
-        
-        <div id="log">Waiting for you to click Start...</div>
+        <div id="log">Waiting for Start...</div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
-    <video id="webcam" playsinline autoplay muted width="320" height="240"></video>
+    <video id="webcam" playsinline autoplay muted></video>
 
     <script>
-        // --- 1. LOGGING SYSTEM (Must run first) ---
-        var logElement = document.getElementById('log');
-        function printLog(message) {
-            logElement.innerHTML += "<div>> " + message + "</div>";
-            logElement.scrollTop = logElement.scrollHeight;
-        }
-
-        // --- 2. GLOBAL VARIABLES ---
+        var log = document.getElementById('log');
         var video = document.getElementById('webcam');
         var canvas = document.getElementById('gameCanvas');
         var ctx = canvas.getContext('2d');
+
         var balls = [];
+        var particles = [];
         var lastFrame = null;
-        var floorLevel = 0.85; // 85% down the screen
+        var floorLevel = 0.85;
 
-        // --- 3. STARTUP FUNCTION (Triggered by button) ---
+        // --- ADMIN SETTINGS ---
+        var settings = {
+            activityMode: 'Ball Pit',
+            gravity: 0.5,
+            kickStrength: 18,
+            bounce: 0.7,
+            ballCount: 15,
+            backgroundColor: '#1a1a1a'
+        };
+
+        // --- SETUP ---
         function startApp() {
-            printLog("Button clicked. Initializing...");
-            
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                printLog("<span style='color:red'>ERROR: Camera API not found. Must use HTTPS.</span>");
-                return;
-            }
-
-            printLog("Requesting camera permissions...");
-            
+            log.innerText = "Requesting camera...";
             navigator.mediaDevices.getUserMedia({ video: true })
                 .then(function(stream) {
-                    printLog("Permission granted! Attaching stream...");
+                    log.innerText = "Camera found! Starting...";
                     video.srcObject = stream;
-                    
                     video.onplaying = function() {
-                        printLog("Video is playing. Starting game engine...");
-                        document.getElementById('ui-layer').style.display = 'none';
-                        startGame();
+                        document.getElementById('ui').style.display = 'none';
+                        initGame();
                     };
-                    
-                    video.play().catch(function(err) {
-                        printLog("<span style='color:red'>Autoplay blocked: " + err.message + "</span>");
-                    });
                 })
                 .catch(function(err) {
-                    printLog("<span style='color:red'>CAMERA FAILED: " + err.name + "</span>");
+                    log.innerText = "Error: " + err.name;
+                    log.style.color = "red";
                 });
         }
 
-        // --- 4. GAME ENGINE ---
-        function startGame() {
+        function initGame() {
+            // --- Build Admin Panel ---
+            try {
+                var gui = new dat.GUI();
+                gui.add(settings, 'activityMode', ['Ball Pit', 'Floor is Lava']).name('Activity Mode');
+                var physicsFolder = gui.addFolder('Physics');
+                physicsFolder.add(settings, 'gravity', 0.1, 2.0);
+                physicsFolder.add(settings, 'kickStrength', 5, 30);
+                physicsFolder.add(settings, 'bounce', 0.1, 1.0);
+                physicsFolder.add(settings, 'ballCount', 5, 50).onFinishChange(resetBalls);
+                physicsFolder.open();
+                gui.addColor(settings, 'backgroundColor');
+            } catch (e) {
+                console.warn("dat.GUI failed to load, running without admin panel.");
+            }
+
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
-            
-            // Create 15 balls
-            for (var i = 0; i < 15; i++) {
-                balls.push({
-                    x: Math.random() * canvas.width,
-                    y: (canvas.height * floorLevel) - 100,
-                    radius: Math.random() * 30 + 30,
-                    vx: (Math.random() - 0.5) * 4,
-                    vy: 0,
-                    color: 'hsl(' + Math.floor(Math.random() * 360) + ', 80%, 50%)'
-                });
-            }
-            
+
+            resetBalls();
             trackMotion();
             gameLoop();
         }
-
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+        
+        function resetBalls() {
+            balls = [];
+            for (var i = 0; i < settings.ballCount; i++) {
+                balls.push(createBall());
+            }
         }
 
-        // --- 5. MOTION TRACKING ---
+        function createBall() {
+            var floorY = canvas.height * floorLevel;
+            return {
+                x: Math.random() * canvas.width,
+                y: floorY - 100 - (Math.random() * 200),
+                radius: Math.random() * 25 + 25,
+                vx: (Math.random() - 0.5) * 4,
+                vy: 0,
+                color: 'hsl(' + Math.floor(Math.random() * 360) + ', 80%, 60%)'
+            };
+        }
+
+        // --- MOTION TRACKING ---
         function trackMotion() {
             var mCanvas = document.createElement('canvas');
+            var mCtx = mCanvas.getContext('2d', { willReadFrequently: true });
             mCanvas.width = 64;
             mCanvas.height = 48;
-            var mCtx = mCanvas.getContext('2d');
 
             function scan() {
                 mCtx.drawImage(video, 0, 0, 64, 48);
                 var currentFrame = mCtx.getImageData(0, 0, 64, 48).data;
 
                 if (lastFrame) {
-                    // Only scan the bottom 30% of the camera view
-                    var scanStartY = Math.floor(48 * (floorLevel - 0.2)); 
-                    
+                    var scanStartY = Math.floor(48 * (floorLevel - 0.2));
                     for (var y = scanStartY; y < 48; y++) {
                         for (var x = 0; x < 64; x++) {
                             var idx = (y * 64 + x) * 4;
-                            // Check red channel difference
-                            var diff = Math.abs(currentFrame[idx] - lastFrame[idx]);
-
-                            if (diff > 40) {
-                                // Map tiny camera coordinate to big screen coordinate
-                                var screenX = (1.0 - (x / 64)) * canvas.width; // Mirrored
+                            if (Math.abs(currentFrame[idx] - lastFrame[idx]) > 40) {
+                                var screenX = (1.0 - (x / 64)) * canvas.width;
                                 var screenY = (y / 48) * canvas.height;
-
-                                // Check if we kicked a ball
                                 for (var b = 0; b < balls.length; b++) {
                                     var dx = balls[b].x - screenX;
                                     var dy = balls[b].y - screenY;
-                                    var dist = Math.sqrt(dx*dx + dy*dy);
-                                    
-                                    if (dist < balls[b].radius + 30) {
-                                        balls[b].vy = -15 - Math.random() * 10; // Kick UP
-                                        balls[b].vx += dx * 0.1; // Kick SIDEWAYS
+                                    if (Math.sqrt(dx * dx + dy * dy) < balls[b].radius + 35) {
+                                        balls[b].vy = -settings.kickStrength;
+                                        balls[b].vx += dx * 0.1;
                                     }
                                 }
                             }
                         }
                     }
                 }
-                
-                // Copy current array to lastFrame array
                 lastFrame = new Uint8ClampedArray(currentFrame);
-                setTimeout(scan, 50); // Scan 20 times a second
+                setTimeout(scan, 50);
             }
             scan();
         }
 
-        // --- 6. RENDER LOOP ---
+        // --- GAME LOOP & RENDERING ---
         function gameLoop() {
             requestAnimationFrame(gameLoop);
-            
-            // Clear background
-            ctx.fillStyle = '#222';
+            ctx.fillStyle = settings.backgroundColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // Draw floor line
+
             var floorY = canvas.height * floorLevel;
-            ctx.strokeStyle = '#444';
-            ctx.lineWidth = 5;
+
+            // Draw Floor
+            if (settings.activityMode === 'Floor is Lava') {
+                ctx.fillStyle = 'rgba(255, 50, 50, 0.8)';
+                ctx.fillRect(0, floorY, canvas.width, canvas.height - floorY);
+            }
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 4;
             ctx.beginPath();
             ctx.moveTo(0, floorY);
             ctx.lineTo(canvas.width, floorY);
             ctx.stroke();
-            
-            // Update and draw balls
-            for (var i = 0; i < balls.length; i++) {
+
+            // Update & Draw Balls
+            for (var i = balls.length - 1; i >= 0; i--) {
                 var b = balls[i];
-                
-                // Physics
-                b.vy += 0.5; // Gravity
+                b.vy += settings.gravity;
                 b.x += b.vx;
                 b.y += b.vy;
-                b.vx *= 0.98; // Friction
-                
+                b.vx *= 0.99;
+
                 // Floor Collision
                 if (b.y + b.radius > floorY) {
                     b.y = floorY - b.radius;
-                    b.vy *= -0.7; // Bounce
+                    b.vy *= -settings.bounce;
+
+                    if (settings.activityMode === 'Floor is Lava') {
+                        explode(b.x, b.y, b.color);
+                        balls[i] = createBall(); // Replace the exploded ball
+                        continue;
+                    }
+                }
+                if (b.x < -b.radius || b.x > canvas.width + b.radius) {
+                    balls[i] = createBall(); // Respawn if off-screen
                 }
                 
-                // Wall Collision
-                if (b.x - b.radius < 0) { b.x = b.radius; b.vx *= -1; }
-                if (b.x + b.radius > canvas.width) { b.x = canvas.width - b.radius; b.vx *= -1; }
-                
-                // Draw
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
                 ctx.fillStyle = b.color;
                 ctx.fill();
             }
+
+            // Update & Draw Particles
+            for (var i = particles.length - 1; i >= 0; i--) {
+                var p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.2;
+                p.alpha -= 0.02;
+                if (p.alpha <= 0) particles.splice(i, 1);
+                
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, p.size, p.size);
+                ctx.globalAlpha = 1.0;
+            }
         }
+        
+        function explode(x, y, color) {
+            for (var i = 0; i < 30; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 15,
+                    vy: (Math.random() - 1.0) * 15,
+                    size: Math.random() * 5 + 2,
+                    color: color,
+                    alpha: 1.0
+                });
+            }
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        
+        document.addEventListener('keydown', function(e) {
+            if (e.key.toLowerCase() === 'f') {
+                if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen();
+                    document.body.classList.add('kiosk-mode');
+                } else {
+                    document.exitFullscreen();
+                    document.body.classList.remove('kiosk-mode');
+                }
+            }
+        });
     </script>
 </body>
 </html>
