@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ground-Level Sensory Wall - Bronx Children's Museum</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #0a0a0a; font-family: sans-serif; color: white; }
+        canvas { display: block; }
+        #webcam { display: none; }
+        
+        #[...](asc_slot://start-slot-11)overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: #111; z-index: 100;
+        }
+        button {
+            padding: 20px 50px; font-size: 24px; cursor: pointer;
+            background: #2ecc71; color: white; border: none; border-radius: 50px;
+        }
+        
+        /* Hidden UI that appears when you move the mouse to the top */
+        #admin {
+            position: absolute; top: 0; left: 0; width: 100%; padding: 10px;
+            background: rgba(0,0,0,0.8); display: flex; gap: 20px;
+            transform: translateY(-100%); transition: 0.3s; z-index: 50;
+        }
+        #admin:hover { transform: translateY(0); }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <h1>FLOOR-WALL INTERACTIVE</h1>
+        <p>Interaction happens at the bottom of the wall.</p>
+        <button id="startBtn">START SYSTEM</button>
+    </div>
+
+    <!-- Hidden Calibration UI -->
+    <div id="admin">
+        <label>Ground Level (0-100%): <input type="range" id="floorLevel" min="50" max="100" value="85"></label>
+        <label>Sensitivity: <input type="range" id="sens" min="10" max="100" value="40"></label>
+        <span>Hover at top for Admin Menu | Press 'F' for Fullscreen</span>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <video id="webcam" playsinline autoplay muted></video>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const floorSlider = document.getElementById('floorLevel');
+        const sensSlider = document.getElementById('sens');
+        
+        let items = [];
+        let lastFrameData;
+        let isRunning = false;
+
+        // --- START SYSTEM ---
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    video.play();
+                    document.getElementById('overlay').style.display = 'none';
+                    init();
+                };
+            } catch (err) { alert("Camera error: " + err); }
+        });
+
+        class InteractionItem {
+            constructor(type) {
+                this.type = type; // 'ball', 'pad', 'coin'
+                this.x = Math.random() * canvas.width;
+                this.y = canvas.height * (floorSlider.value / 100) - 20;
+                this.radius = 40;
+                this.color = this.getRandomColor();
+                this.vx = 0;
+                this.vy = 0;
+                this.active = true;
+                this.opacity = 1.0;
+            }
+
+            getRandomColor() {
+                const colors = ['#e74c3c', '#3498db', '#f1c40f', '#9b52e2', '#2ecc71'];
+                return colors[Math.floor(Math.random() * colors.length)];
+            }
+
+            [...](asc_slot://start-slot-13)update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vx *= 0.95; // Friction
+                this.vy += 0.5;  // Gravity
+
+                [...](asc_slot://start-slot-15)// Floor Collision
+                const floorY = canvas.height * (floorSlider.value / 100);
+                if (this.y + this.radius > floorY) {
+                    this.y = floorY - this.radius;
+                    this.vy *= -0.4; // Bounce
+                }
+
+                [...](asc_slot://start-slot-17)// Fade if kicked hard
+                if (Math.abs(this.vx) > 5) this.opacity -= 0.01;
+                if (this.opacity <= 0) this.active = false;
+            }
+
+            draw() {
+                ctx.globalAlpha = this.opacity;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.strokeStyle = "white";
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        [...](asc_slot://start-slot-19)function init() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            isRunning = true;
+            
+            [...](asc_slot://start-slot-21)// Spawn initial items
+            for(let i=0; i<8; i++) items.push(new InteractionItem('ball'));
+            
+            trackGroundMotion();
+            animate();
+        }
+
+        [...](asc_slot://start-slot-23)function trackGroundMotion() {
+            const mCanvas = document.createElement('canvas');
+            const mCtx = mCanvas.getContext('2d');
+            mCanvas.width = 64;
+            mCanvas.height = 48;
+
+            function process() {
+                mCtx.drawImage(video, 0, 0, 64, 48);
+                const current = mCtx.getImageData(0, 0, 64, 48).data;
+                const floorThreshold = floorSlider.value / 100;
+
+                [...](asc_slot://start-slot-25)if (lastFrameData) {
+                    for (let i = 0; i < current.length; i += 4) {
+                        const yPercent = Math.floor(i / 4 / 64) / 48;
+                        
+                        [...](asc_slot://start-slot-27)// ONLY TRACK MOTION NEAR THE FLOOR
+                        if (yPercent > floorThreshold - 0.1) {
+                            const diff = Math.abs(current[i] - lastFrameData[i]);
+                            if (diff > sensSlider.value) {
+                                const x = ((i / 4) % 64) / 64;
+                                const canvasX = (1.0 - x) * canvas.width; // Mirrored
+                                
+                                // Check if this motion hit any items
+                                items.forEach(item => {
+                                    const dx = canvasX - item.x;
+                                    const dy = (yPercent * canvas.height) - item.y;
+                                    if (Math.sqrt(dx*dx + dy*dy) < item.radius + 20) {
+                                        item.vx += (canvasX - item.x) * 0.2;
+                                        item.vy -= 10; // Kick it up!
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                lastFrameData = current;
+                setTimeout(process, 50);
+            }
+            process();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            ctx.fillStyle = "#0a0a0a";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Ground Line
+            const floorY = canvas.height * (floorSlider.value / 100);
+            ctx.strokeStyle = "#333";
+            ctx.setLineDash([5, 15]);
+            ctx.beginPath();
+            ctx.moveTo(0, floorY);
+            ctx.lineTo(canvas.width, floorY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            items.forEach((item, index) => {
+                item.update();
+                item.draw();
+                if (!item.active) items[index] = new InteractionItem('ball');
+            });
+        }
+
+        // Fullscreen Toggle
+        document.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'f') document.documentElement.requestFullscreen();
+        });
+    </script>
+</body>
+</html>
