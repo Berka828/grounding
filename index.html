@@ -2,39 +2,33 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Bronx Riverbank 3D Floor</title>
+    <title>Riverbank 3D - Final</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #050505; font-family: sans-serif; }
-        body.kiosk-mode { cursor: none; }
-        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        body { margin: 0; overflow: hidden; background: #080808; font-family: sans-serif; }
+        canvas { display: block; }
         #webcam { display: none; }
         #ui {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            background: #0a0a0a; z-index: 10; color: white; transition: opacity 0.5s;
+            background: #080808; z-index: 10; color: white; text-align: center;
         }
         button {
             padding: 25px 60px; font-size: 24px; cursor: pointer;
-            background-color: #3498db; color: white; border: none; border-radius: 60px;
+            background-color: #3498db; color: white; border: none; border-radius: 50px;
         }
-        #log { margin-top: 20px; color: #aaa; font-family: monospace; }
-        .dg.ac { z-index: 50 !important; }
-        body.kiosk-mode .dg.ac { opacity: 0; pointer-events: none; }
+        #log { margin-top: 20px; font-family: monospace; color: #888; }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
 </head>
 <body>
 
     <div id="ui">
         <h1>RIVERBANK 3D</h1>
-        <p>Kick items into the distance.</p>
+        <p>Kick the items to make them fly into the distance.</p>
         <button onclick="startApp()">START SENSORS</button>
-        <div id="log">Waiting...</div>
+        <div id="log">Awaiting Initialization...</div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
-    
-    <!-- Muted is mandatory for autoplay on mobile/safari -->
     <video id="webcam" playsinline autoplay muted></video>
 
     <script>
@@ -46,18 +40,202 @@
         var objects = [];
         var particles = [];
         var lastFrame = null;
-        var engineBooted = false; // Prevents double-booting
-        
-        var settings = {
-            gravity: 0.4,
-            kickPower: 15,
-            ballCount: 10,
-            critterCount: 5,
-            bgColor: '#050505'
-        };
+        var engineBooted = false;
 
-        // --- 1. THE FORCED BOOT STARTUP ---
+        // --- CUSTOMIZABLE SETTINGS ---
+        // You can change these values directly in the code
+        var settings = {
+            gravity: 0.4,       // How heavy the items feel (0.1 to 1.0)
+            kickPower: 18,      // How high the items get kicked (10 to 30)
+            ballCount: 12,      // Number of balls on screen
+            critterCount: 6,    // Number of scurrying critters
+            bgColor: '#080808'  // Background color of the riverbank
+        };
+        // -----------------------------
+
         function startApp() {
             log.innerText = "Requesting camera...";
             navigator.mediaDevices.getUserMedia({ video: true })
- 
+                .then(function(stream) {
+                    log.innerText = "Stream acquired. Waiting for video data...";
+                    video.srcObject = stream;
+                    video.play().catch(function(e){ log.innerText = "Autoplay blocked."; });
+
+                    var checkInterval = setInterval(function() {
+                        if (video.readyState >= 3 && !engineBooted) { // HAVE_FUTURE_DATA
+                            clearInterval(checkInterval);
+                            engineBooted = true;
+                            log.innerText = "Video Ready. Booting Engine.";
+                            document.getElementById('ui').style.display = 'none';
+                            initGame();
+                        }
+                    }, 100);
+                })
+                .catch(function(err) {
+                    log.innerText = "CAMERA ERROR: " + err.name;
+                    log.style.color = "red";
+                });
+        }
+
+        function initGame() {
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            resetObjects();
+            trackMotion();
+            gameLoop();
+        }
+
+        function resetObjects() {
+            objects = [];
+            for (var i = 0; i < settings.ballCount; i++) {
+                objects.push(createObject('ball'));
+            }
+            for (var i = 0; i < settings.critterCount; i++) {
+                objects.push(createObject('critter'));
+            }
+        }
+
+        function createObject(type) {
+            var floor = canvas.height * 0.85;
+            return {
+                type: type,
+                x: Math.random() * canvas.width,
+                y: floor - 20,
+                z: 0,
+                radius: type === 'ball' ? Math.random() * 20 + 30 : 15,
+                vx: (Math.random() - 0.5) * 4,
+                vy: 0,
+                vz: 0,
+                color: type === 'ball' ? 'hsl(' + Math.floor(Math.random() * 360) + ', 70%, 60%)' : '#2ecc71',
+                growth: 0.1
+            };
+        }
+
+        function trackMotion() {
+            var mCanvas = document.createElement('canvas');
+            var mCtx = mCanvas.getContext('2d', { willReadFrequently: true });
+            mCanvas.width = 64;
+            mCanvas.height = 48;
+
+            function scan() {
+                if (video.readyState < 3) {
+                    setTimeout(scan, 100);
+                    return;
+                }
+                mCtx.drawImage(video, 0, 0, 64, 48);
+                var current = mCtx.getImageData(0, 0, 64, 48).data;
+                if (lastFrame) {
+                    for (var i = 0; i < current.length; i += 4) {
+                        var yPerc = (Math.floor(i / 4 / 64)) / 48;
+                        if (yPerc > 0.7) {
+                            if (Math.abs(current[i] - lastFrame[i]) > 40) {
+                                var x = (1.0 - ((i / 4) % 64) / 64) * canvas.width;
+                                var y = yPerc * canvas.height;
+                                objects.forEach(function(obj) {
+                                    var dx = obj.x - x;
+                                    var dy = obj.y - y;
+                                    if (Math.sqrt(dx * dx + dy * dy) < obj.radius + 40) {
+                                        if (obj.type === 'ball') {
+                                            obj.vz = 0.05;
+                                            obj.vy = -settings.kickPower * 0.5;
+                                            obj.vx = (obj.x - x) * 0.5;
+                                        } else {
+                                            obj.vx = (obj.x - x) * 1.5;
+                                            obj.vy = -5;
+                                        }
+                                        createSplatter(obj.x, obj.y, obj.color);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                lastFrame = new Uint8ClampedArray(current);
+                setTimeout(scan, 50);
+            }
+            scan();
+        }
+
+        function createSplatter(x, y, color) {
+            for (var i = 0; i < 10; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    size: Math.random() * 5,
+                    alpha: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+            ctx.fillStyle = settings.bgColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            var floorY = canvas.height * 0.85;
+            ctx.strokeStyle = '#222';
+            ctx.beginPath();
+            ctx.moveTo(0, floorY);
+            ctx.lineTo(canvas.width, floorY);
+            ctx.stroke();
+
+            for (var i = particles.length - 1; i >= 0; i--) {
+                var p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.alpha -= 0.02;
+                if (p.alpha <= 0) particles.splice(i, 1);
+                else {
+                    ctx.globalAlpha = p.alpha;
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(p.x, p.y, p.size, p.size);
+                }
+            }
+            ctx.globalAlpha = 1.0;
+
+            for (var i = 0; i < objects.length; i++) {
+                var o = objects[i];
+                if (o.growth < 1.0) o.growth += 0.05;
+                o.z += o.vz; o.x += o.vx; o.y += o.vy; o.vy += settings.gravity;
+                var scale = 1.0 - (o.z * 0.8);
+                var currentRadius = o.radius * scale * o.growth;
+
+                if (o.y + currentRadius > floorY) {
+                    o.y = floorY - currentRadius;
+                    o.vy *= -0.6; o.vz *= 0.8;
+                }
+
+                if (o.z > 0.95 || o.x < -100 || o.x > canvas.width + 100) {
+                    objects[i] = createObject(o.type);
+                    objects[i].growth = 0;
+                }
+
+                ctx.beginPath();
+                ctx.arc(o.x, o.y, currentRadius, 0, Math.PI * 2);
+                ctx.fillStyle = o.color;
+                ctx.fill();
+
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.beginPath();
+                ctx.arc(o.x - currentRadius * 0.3, o.y - currentRadius * 0.3, currentRadius * 0.2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key.toLowerCase() === 'f') {
+                if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen();
+                } else {
+                    document.exitFullscreen();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
