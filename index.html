@@ -4,21 +4,20 @@
     <meta charset="UTF-8">
     <title>Bronx Riverbank 3D Floor</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; overflow: hidden; background: #050505; font-family: sans-serif; }
         body.kiosk-mode { cursor: none; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
         #webcam { display: none; }
         #ui {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            background: #0a0a0a; z-index: 10; color: white;
+            background: #0a0a0a; z-index: 10; color: white; transition: opacity 0.5s;
         }
         button {
             padding: 25px 60px; font-size: 24px; cursor: pointer;
             background-color: #3498db; color: white; border: none; border-radius: 60px;
-            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.4);
         }
-        #log { margin-top: 20px; color: #555; }
+        #log { margin-top: 20px; color: #aaa; font-family: monospace; }
         .dg.ac { z-index: 50 !important; }
         body.kiosk-mode .dg.ac { opacity: 0; pointer-events: none; }
     </style>
@@ -28,12 +27,14 @@
 
     <div id="ui">
         <h1>RIVERBANK 3D</h1>
-        <p>Kick items into the distance | Step on the scuttlers</p>
-        <button onclick="startApp()">ACTIVATE FLOOR</button>
-        <div id="log">Sensors Standing By...</div>
+        <p>Kick items into the distance.</p>
+        <button onclick="startApp()">START SENSORS</button>
+        <div id="log">Waiting...</div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
+    
+    <!-- Muted is mandatory for autoplay on mobile/safari -->
     <video id="webcam" playsinline autoplay muted></video>
 
     <script>
@@ -45,212 +46,18 @@
         var objects = [];
         var particles = [];
         var lastFrame = null;
+        var engineBooted = false; // Prevents double-booting
         
-        // Settings
         var settings = {
             gravity: 0.4,
             kickPower: 15,
-            perspectiveDepth: 0.96, // How fast they shrink
-            critterCount: 5,
             ballCount: 10,
+            critterCount: 5,
             bgColor: '#050505'
         };
 
+        // --- 1. THE FORCED BOOT STARTUP ---
         function startApp() {
-            log.innerText = "Initializing Optical Sensors...";
+            log.innerText = "Requesting camera...";
             navigator.mediaDevices.getUserMedia({ video: true })
-                .then(function(stream) {
-                    video.srcObject = stream;
-                    video.onplaying = function() {
-                        document.getElementById('ui').style.display = 'none';
-                        initGame();
-                    };
-                })
-                .catch(function(err) {
-                    log.innerText = "Hardware Connection Error: " + err.name;
-                });
-        }
-
-        function initGame() {
-            var gui = new dat.GUI();
-            gui.add(settings, 'kickPower', 5, 30).name('Kick Strength');
-            gui.add(settings, 'gravity', 0.1, 1.0).name('Weight');
-            gui.add(settings, 'ballCount', 0, 30).onFinishChange(resetObjects);
-            gui.add(settings, 'critterCount', 0, 15).onFinishChange(resetObjects);
-            gui.addColor(settings, 'bgColor').name('Riverbank Color');
-
-            resizeCanvas();
-            window.addEventListener('resize', resizeCanvas);
-            resetObjects();
-            trackMotion();
-            gameLoop();
-        }
-
-        function resetObjects() {
-            objects = [];
-            for (let i = 0; i < settings.ballCount; i++) objects.push(createObject('ball'));
-            for (let i = 0; i < settings.critterCount; i++) objects.push(createObject('critter'));
-        }
-
-        function createObject(type) {
-            const horizon = canvas.height * 0.4;
-            const floor = canvas.height * 0.85;
-            return {
-                type: type,
-                x: Math.random() * canvas.width,
-                y: floor - 20,
-                z: 0, // 0 is close to camera, 1 is horizon
-                radius: type === 'ball' ? Math.random() * 20 + 30 : 15,
-                vx: (Math.random() - 0.5) * 4,
-                vy: 0,
-                vz: 0,
-                color: type === 'ball' ? 'hsl(' + Math.floor(Math.random() * 360) + ', 70%, 50%)' : '#2ecc71',
-                growth: 0.1, // For respawn effect
-                active: true
-            };
-        }
-
-        function trackMotion() {
-            var mCanvas = document.createElement('canvas');
-            var mCtx = mCanvas.getContext('2d', { willReadFrequently: true });
-            mCanvas.width = 64; mCanvas.height = 48;
-
-            function scan() {
-                mCtx.drawImage(video, 0, 0, 64, 48);
-                var current = mCtx.getImageData(0, 0, 64, 48).data;
-                if (lastFrame) {
-                    for (var i = 0; i < current.length; i += 4) {
-                        var yPerc = (Math.floor(i / 4 / 64)) / 48;
-                        if (yPerc > 0.7) { // Only scan the bottom of the wall
-                            if (Math.abs(current[i] - lastFrame[i]) > 40) {
-                                var x = (1.0 - ((i/4) % 64) / 64) * canvas.width;
-                                var y = yPerc * canvas.height;
-                                
-                                objects.forEach(obj => {
-                                    var dx = obj.x - x;
-                                    var dy = obj.y - y;
-                                    var dist = Math.sqrt(dx*dx + dy*dy);
-                                    if (dist < obj.radius + 40) {
-                                        if (obj.type === 'ball') {
-                                            obj.vz = 0.05; // Launch into 3D distance
-                                            obj.vy = -settings.kickPower * 0.5;
-                                            obj.vx = (obj.x - x) * 0.5;
-                                        } else {
-                                            // Critter scurries away
-                                            obj.vx = (obj.x - x) * 1.5;
-                                            obj.vy = -5;
-                                        }
-                                        createSplatter(obj.x, obj.y, obj.color);
-                                    }
-                                });
-                            }
-                        }
-                    }
-                }
-                lastFrame = new Uint8ClampedArray(current);
-                setTimeout(scan, 50);
-            }
-            scan();
-        }
-
-        function createSplatter(x, y, color) {
-            for(let i=0; i<10; i++) {
-                particles.push({
-                    x: x, y: y,
-                    vx: (Math.random()-0.5)*10,
-                    vy: (Math.random()-0.5)*10,
-                    size: Math.random()*5,
-                    alpha: 1.0,
-                    color: color
-                });
-            }
-        }
-
-        function gameLoop() {
-            requestAnimationFrame(gameLoop);
-            ctx.fillStyle = settings.bgColor;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            const floorY = canvas.height * 0.85;
-            const horizonY = canvas.height * 0.4;
-
-            // Draw Ground Line
-            ctx.strokeStyle = '#222';
-            ctx.beginPath(); ctx.moveTo(0, floorY); ctx.lineTo(canvas.width, floorY); ctx.stroke();
-
-            // Update & Draw Particles
-            for (let i = particles.length - 1; i >= 0; i--) {
-                let p = particles[i];
-                p.x += p.vx; p.y += p.vy; p.alpha -= 0.02;
-                if (p.alpha <= 0) particles.splice(i, 1);
-                else {
-                    ctx.globalAlpha = p.alpha;
-                    ctx.fillStyle = p.color;
-                    ctx.fillRect(p.x, p.y, p.size, p.size);
-                }
-            }
-            ctx.globalAlpha = 1.0;
-
-            // Update & Draw Objects
-            for (let i = 0; i < objects.length; i++) {
-                let o = objects[i];
-                
-                // Growing Spawn Effect
-                if (o.growth < 1.0) o.growth += 0.05;
-
-                // 3D Distance Logic
-                o.z += o.vz;
-                o.x += o.vx;
-                o.y += o.vy;
-                o.vy += settings.gravity;
-
-                // Scale based on distance (Z)
-                let scale = 1.0 - (o.z * 0.8);
-                let currentRadius = o.radius * scale * o.growth;
-
-                // Floor Collision
-                if (o.y + currentRadius > floorY) {
-                    o.y = floorY - currentRadius;
-                    o.vy *= -0.6;
-                    o.vz *= 0.8; // Lose forward momentum on bounce
-                }
-
-                // Respawn if too far or off-screen
-                if (o.z > 0.95 || o.x < -100 || o.x > canvas.width + 100) {
-                    objects[i] = createObject(o.type);
-                    objects[i].growth = 0; // Trigger bubble-up effect
-                }
-
-                // Draw Object
-                ctx.beginPath();
-                ctx.arc(o.x, o.y, currentRadius, 0, Math.PI * 2);
-                ctx.fillStyle = o.color;
-                ctx.fill();
-                
-                // Add a "shine" for 3D effect
-                ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                ctx.beginPath();
-                ctx.arc(o.x - currentRadius*0.3, o.y - currentRadius*0.3, currentRadius*0.2, 0, Math.PI*2);
-                ctx.fill();
-            }
-        }
-
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key.toLowerCase() === 'f') {
-                if (!document.fullscreenElement) {
-                    document.documentElement.requestFullscreen();
-                    document.body.classList.add('kiosk-mode');
-                } else {
-                    document.exitFullscreen();
-                    document.body.classList.remove('kiosk-mode');
-                }
-            }
-        });
-    </script>
-</body>
-</html>
+ 
