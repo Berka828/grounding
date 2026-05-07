@@ -2,9 +2,9 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>BxCM Interactive Playroom - Pro</title>
+    <title>BxCM Interactive Playroom - Ripples</title>
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #ffffff; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
         #webcam { display: none; }
         #ui {
@@ -26,7 +26,8 @@
 </head>
 <body>
     <div id="ui">
-        <h1>INTERACTIVE PLAYROOM</h1>
+        <h1 style="letter-spacing: 2px; font-weight: 300;">INTERACTIVE PLAYROOM</h1>
+        <p style="color: #666; margin-bottom: 30px;">Step to make ripples. Kick to play. Reach high for magic.</p>
         <button onclick="startApp()">START EXPERIENCE</button>
         <div id="log">Sensors Ready</div>
     </div>
@@ -42,10 +43,12 @@
         var objects = [];
         var skyParticles = [];
         var floorSplatter = [];
+        var ripples = []; // NEW: Ripple array
         var lastFrame = null;
         var engineBooted = false;
         var gravityWells = [];
         var handRaiseTimer = 0;
+        
         var logoImg = new Image();
         logoImg.src = 'BxCM_Logo_FullColor_dark-backgrounds.png';
 
@@ -62,6 +65,7 @@
         
         var BxCM_COLORS = ['#f7b71d', '#f07c28', '#00a7e1', '#9e2984', '#388f48'];
 
+        // --- BULLETPROOF CAMERA LOGIC (UNTOUCHED) ---
         function startApp() {
             log.innerText = "Requesting camera...";
             navigator.mediaDevices.getUserMedia({ video: true })
@@ -83,17 +87,20 @@
                 });
         }
 
+        // --- GAME ENGINE ---
         function initGame() {
-            var gui = new dat.GUI();
-            var fGeneral = gui.addFolder('General');
-            fGeneral.addColor(settings, 'bgColor').name('Background Color');
-            fGeneral.add(settings, 'logoOpacity', 0, 0.2).name('Logo Opacity');
-            var fObjects = gui.addFolder('Floor Objects');
-            fObjects.add(settings, 'objectMix', ['Balls Only', 'Leaves & Puddles', 'Full Mix']).name('Object Mix').onFinishChange(resetObjects);
-            fObjects.add(settings, 'kickPower', 5, 30).name('Kick Strength');
-            var fSky = gui.addFolder('Sky Interaction');
-            fSky.add(settings, 'skyMode', ['Attractor', 'Rainbow Trail']).name('Sky Effect');
-            fGeneral.open(); fObjects.open(); fSky.open();
+            try {
+                var gui = new dat.GUI();
+                var fGeneral = gui.addFolder('General');
+                fGeneral.addColor(settings, 'bgColor').name('Background Color');
+                fGeneral.add(settings, 'logoOpacity', 0, 0.5).name('Logo Opacity');
+                var fObjects = gui.addFolder('Floor Objects');
+                fObjects.add(settings, 'objectMix', ['Balls Only', 'Leaves & Puddles', 'Full Mix']).name('Object Mix').onFinishChange(resetObjects);
+                fObjects.add(settings, 'kickPower', 5, 30).name('Kick Strength');
+                var fSky = gui.addFolder('Sky Interaction');
+                fSky.add(settings, 'skyMode', ['Attractor', 'Rainbow Trail']).name('Sky Effect');
+                fGeneral.open(); fObjects.open(); fSky.open();
+            } catch(e) {}
 
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
@@ -130,6 +137,17 @@
             return newObj;
         }
 
+        // --- NEW: RIPPLE GENERATOR ---
+        function createRipple(x, y, color) {
+            ripples.push({
+                x: x,
+                y: y,
+                radius: 5,
+                color: color || BxCM_COLORS[Math.floor(Math.random() * BxCM_COLORS.length)],
+                alpha: 0.8
+            });
+        }
+
         function trackMotion() {
             var mCanvas = document.createElement('canvas');
             var mCtx = mCanvas.getContext('2d', { willReadFrequently: true });
@@ -155,6 +173,9 @@
                             }
                             
                             if (yPerc > 0.7) { // Floor Zone
+                                // Randomly create ripples when motion happens on the floor
+                                if (Math.random() > 0.95) createRipple(x, canvas.height * 0.85);
+
                                 objects.forEach(function(obj) {
                                     var dx = obj.x - x;
                                     var dy = obj.y - y;
@@ -182,8 +203,7 @@
         }
 
         function createFloorSplatter(x, y, color) {
-            var splatCount = 10;
-            for (var i = 0; i < splatCount; i++) {
+            for (var i = 0; i < 10; i++) {
                 floorSplatter.push({
                     x: x + (Math.random() - 0.5) * 80,
                     y: y + (Math.random() - 0.5) * 30,
@@ -200,7 +220,7 @@
             ctx.fillStyle = settings.bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Draw Subtle Logo
+            // Draw Logo
             if (logoImg.complete && settings.logoOpacity > 0) {
                 ctx.globalAlpha = settings.logoOpacity;
                 var logoAspect = logoImg.width / logoImg.height;
@@ -212,8 +232,8 @@
 
             var floorY = canvas.height * 0.85;
 
-            // Update & Draw Sky Particles
-            if (settings.skyMode === 'Rainbow Trail' && handRaiseTimer > 90) { // 90 frames = ~1.5 seconds
+            // Draw Sky Particles
+            if (settings.skyMode === 'Rainbow Trail' && handRaiseTimer > 90) {
                 if (gravityWells.length > 0) {
                     var well = gravityWells[0];
                     for(var i=0; i<3; i++) {
@@ -247,9 +267,14 @@
                 ctx.fillStyle = p.color || BxCM_COLORS[0];
                 ctx.fillRect(p.x, p.y, p.size, p.size);
             }
+            ctx.globalAlpha = 1.0;
+
+            // Draw Floor Line
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, floorY); ctx.lineTo(canvas.width, floorY); ctx.stroke();
 
             // Draw Floor Splatters
-            ctx.globalAlpha = 1.0;
             for (var i = floorSplatter.length - 1; i >= 0; i--) {
                 var s = floorSplatter[i];
                 s.life -= 0.001;
@@ -263,19 +288,31 @@
                 }
             }
             ctx.globalAlpha = 1.0;
-            
-            // Draw Floor Line
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
-            ctx.beginPath(); ctx.moveTo(0, floorY); ctx.lineTo(canvas.width, floorY); ctx.stroke();
+
+            // NEW: Draw Ripples
+            for (var i = ripples.length - 1; i >= 0; i--) {
+                var r = ripples[i];
+                r.radius += 3;
+                r.alpha -= 0.015;
+                if (r.alpha <= 0) ripples.splice(i, 1);
+                else {
+                    ctx.globalAlpha = r.alpha;
+                    ctx.strokeStyle = r.color;
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.ellipse(r.x, r.y, r.radius, r.radius * 0.3, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
+            ctx.globalAlpha = 1.0;
 
             // Draw Objects
             for (var i = 0; i < objects.length; i++) {
                 var o = objects[i];
                 if (o.growth < 1.0) o.growth += 0.05;
                 
-                // Physics
                 o.z += o.vz; o.x += o.vx; o.y += o.vy;
-                o.vy += settings.gravity * (o.type === 'leaf' ? 0.5 : 1.0);
+                o.vy += 0.4 * (o.type === 'leaf' ? 0.5 : 1.0); // Gravity
                 o.vx *= 0.98; o.vy *= 0.99; o.vz *= 0.98;
 
                 var scale = 1.0 - (o.z * 0.8);
@@ -285,7 +322,12 @@
                 if (o.y + r > floorY) {
                     o.y = floorY - r;
                     o.vy *= -0.4; o.vz *= 0.8;
+                    // NEW: Create a ripple when a ball bounces hard enough
+                    if (o.type === 'ball' && Math.abs(o.vy) > 1.5) {
+                        createRipple(o.x, floorY, o.color);
+                    }
                 }
+                
                 // Respawn
                 if (o.z > 0.95 || o.x < -100 || o.x > canvas.width + 100) {
                     objects[i] = createObject(o.type);
@@ -303,20 +345,23 @@
                 if (o.type === 'leaf') ctx.rotate(o.vx * 0.1);
                 
                 if (o.type === 'ball') {
-                     var ballGrd = ctx.createRadialGradient(-r*0.3, -r*0.3, r*0.1, 0, 0, r);
-                    ballGrd.addColorStop(0, 'rgba(255,255,255,0.7)');
-                    ballGrd.addColorStop(0.7, o.color);
-                    ballGrd.addColorStop(1, o.color.replace(')',',0.7)'));
+                    // Create soft 3D ball gradient based on its color
+                    var ballGrd = ctx.createRadialGradient(-r*0.3, -r*0.3, r*0.1, 0, 0, r);
+                    ballGrd.addColorStop(0, 'rgba(255,255,255,0.8)');
+                    ballGrd.addColorStop(0.5, o.color);
+                    ballGrd.addColorStop(1, 'rgba(0,0,0,0.2)');
                     ctx.fillStyle = ballGrd;
                     ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
                 } else if (o.type === 'leaf') {
                     ctx.fillStyle = o.color;
-                    ctx.fillRect(-r, -r/2, r*2, r);
+                    ctx.fillRect(-r, -r/2, r*2, r); // Simple rectangle leaf
                 } else if (o.type === 'puddle') {
                     if (o.isSquished) o.radius -= 2;
                     if(o.radius > 0) {
-                        ctx.fillStyle = o.color.replace(')',',0.7)');
+                        ctx.fillStyle = o.color;
+                        ctx.globalAlpha = 0.7;
                         ctx.beginPath(); ctx.ellipse(0, (floorY - o.y), r, r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+                        ctx.globalAlpha = 1.0;
                     } else { objects[i] = createObject('puddle'); }
                 }
                 ctx.restore();
