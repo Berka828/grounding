@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sensory Ball Pit</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #222; font-family: Arial, sans-serif; }
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        #webcam { display: none; }
+        
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background-color: #222; z-index: 10; color: white;
+        }
+        
+        button {
+            padding: 20px 40px; font-size: 24px; cursor: pointer;
+            background-color: #e74c3c; color: white; border: none; border-radius: 8px;
+            font-weight: bold; margin-bottom: 20px;
+        }
+        
+        #log {
+            width: 80%; max-width: 600px; height: 150px; background-color: #000;
+            color: #0f0; font-family: monospace; padding: 15px; border-radius: 4px;
+            overflow-y: auto; text-align: left;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1 style="margin-bottom: 5px;">SENSORY BALL PIT</h1>
+        <p style="margin-bottom: 30px; color: #aaa;">Kick the balls at the bottom of the screen.</p>
+        
+        <!-- We use an inline onclick to guarantee the function is called -->
+        <button onclick="startApp()">START CAMERA</button>
+        
+        <div id="log">Waiting for you to click Start...</div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <video id="webcam" playsinline autoplay muted width="320" height="240"></video>
+
+    <script>
+        // --- 1. LOGGING SYSTEM (Must run first) ---
+        var logElement = document.getElementById('log');
+        function printLog(message) {
+            logElement.innerHTML += "<div>> " + message + "</div>";
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        // --- 2. GLOBAL VARIABLES ---
+        var video = document.getElementById('webcam');
+        var canvas = document.getElementById('gameCanvas');
+        var ctx = canvas.getContext('2d');
+        var balls = [];
+        var lastFrame = null;
+        var floorLevel = 0.85; // 85% down the screen
+
+        // --- 3. STARTUP FUNCTION (Triggered by button) ---
+        function startApp() {
+            printLog("Button clicked. Initializing...");
+            
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                printLog("<span style='color:red'>ERROR: Camera API not found. Must use HTTPS.</span>");
+                return;
+            }
+
+            printLog("Requesting camera permissions...");
+            
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(function(stream) {
+                    printLog("Permission granted! Attaching stream...");
+                    video.srcObject = stream;
+                    
+                    video.onplaying = function() {
+                        printLog("Video is playing. Starting game engine...");
+                        document.getElementById('ui-layer').style.display = 'none';
+                        startGame();
+                    };
+                    
+                    video.play().catch(function(err) {
+                        printLog("<span style='color:red'>Autoplay blocked: " + err.message + "</span>");
+                    });
+                })
+                .catch(function(err) {
+                    printLog("<span style='color:red'>CAMERA FAILED: " + err.name + "</span>");
+                });
+        }
+
+        // --- 4. GAME ENGINE ---
+        function startGame() {
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Create 15 balls
+            for (var i = 0; i < 15; i++) {
+                balls.push({
+                    x: Math.random() * canvas.width,
+                    y: (canvas.height * floorLevel) - 100,
+                    radius: Math.random() * 30 + 30,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: 0,
+                    color: 'hsl(' + Math.floor(Math.random() * 360) + ', 80%, 50%)'
+                });
+            }
+            
+            trackMotion();
+            gameLoop();
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        // --- 5. MOTION TRACKING ---
+        function trackMotion() {
+            var mCanvas = document.createElement('canvas');
+            mCanvas.width = 64;
+            mCanvas.height = 48;
+            var mCtx = mCanvas.getContext('2d');
+
+            function scan() {
+                mCtx.drawImage(video, 0, 0, 64, 48);
+                var currentFrame = mCtx.getImageData(0, 0, 64, 48).data;
+
+                if (lastFrame) {
+                    // Only scan the bottom 30% of the camera view
+                    var scanStartY = Math.floor(48 * (floorLevel - 0.2)); 
+                    
+                    for (var y = scanStartY; y < 48; y++) {
+                        for (var x = 0; x < 64; x++) {
+                            var idx = (y * 64 + x) * 4;
+                            // Check red channel difference
+                            var diff = Math.abs(currentFrame[idx] - lastFrame[idx]);
+
+                            if (diff > 40) {
+                                // Map tiny camera coordinate to big screen coordinate
+                                var screenX = (1.0 - (x / 64)) * canvas.width; // Mirrored
+                                var screenY = (y / 48) * canvas.height;
+
+                                // Check if we kicked a ball
+                                for (var b = 0; b < balls.length; b++) {
+                                    var dx = balls[b].x - screenX;
+                                    var dy = balls[b].y - screenY;
+                                    var dist = Math.sqrt(dx*dx + dy*dy);
+                                    
+                                    if (dist < balls[b].radius + 30) {
+                                        balls[b].vy = -15 - Math.random() * 10; // Kick UP
+                                        balls[b].vx += dx * 0.1; // Kick SIDEWAYS
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Copy current array to lastFrame array
+                lastFrame = new Uint8ClampedArray(currentFrame);
+                setTimeout(scan, 50); // Scan 20 times a second
+            }
+            scan();
+        }
+
+        // --- 6. RENDER LOOP ---
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+            
+            // Clear background
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw floor line
+            var floorY = canvas.height * floorLevel;
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(0, floorY);
+            ctx.lineTo(canvas.width, floorY);
+            ctx.stroke();
+            
+            // Update and draw balls
+            for (var i = 0; i < balls.length; i++) {
+                var b = balls[i];
+                
+                // Physics
+                b.vy += 0.5; // Gravity
+                b.x += b.vx;
+                b.y += b.vy;
+                b.vx *= 0.98; // Friction
+                
+                // Floor Collision
+                if (b.y + b.radius > floorY) {
+                    b.y = floorY - b.radius;
+                    b.vy *= -0.7; // Bounce
+                }
+                
+                // Wall Collision
+                if (b.x - b.radius < 0) { b.x = b.radius; b.vx *= -1; }
+                if (b.x + b.radius > canvas.width) { b.x = canvas.width - b.radius; b.vx *= -1; }
+                
+                // Draw
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+                ctx.fillStyle = b.color;
+                ctx.fill();
+            }
+        }
+    </script>
+</body>
+</html>
