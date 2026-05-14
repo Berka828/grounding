@@ -6,7 +6,7 @@
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
-        #webcam { transform: scaleX(-1); display: none; } /* Mirrored and hidden */
+        #webcam { transform: scaleX(-1); display: none; }
         #ui {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -21,8 +21,6 @@
         #log { margin-top: 20px; font-family: monospace; color: #888; }
         
         .dg.ac { z-index: 50 !important; }
-        body.kiosk-mode { cursor: none; }
-        body.kiosk-mode .dg.ac { opacity: 0; pointer-events: none; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
 </head>
@@ -46,21 +44,25 @@
 
         var objects = [];
         var skyParticles = []; 
+        var motionPoints = [];
+        var popExplosions = []; // NEW: Array to hold all pop particle effects
         var lastFrame = null;
         var engineBooted = false;
         var gravityWells = [];
 
-        // --- GENTLE SETTINGS ---
         var settings = {
-            gravity: 0.2,        // Very light gravity for slow falling
-            kickPower: 8,        // Significantly reduced from 22
-            flightSpeed: 0.02,   // Speed of the "3D" travel
-            airDrag: 0.94,       // High air resistance to slow things down
+            interactionMode: 'Launch', // NEW: Can be 'Launch' or 'Pop'
+            gravity: 0.2,        
+            kickPower: 8,        
+            flightSpeed: 0.02,   
+            airDrag: 0.94,       
             ballCount: 7,
             bgColor: '#f9f9fb',
             particleColor: '#aab7c4',
-            cameraAlpha: 0.2,    // Controls transparency of the camera feed
-            cameraBlur: 4        // Controls the blurriness of the camera feed
+            cameraAlpha: 0.2,    
+            cameraBlur: 4,
+            indicatorColor: '#ffffff',
+            indicatorSize: 30,
         };
 
         function startApp() {
@@ -84,51 +86,50 @@
         function initGame() {
             try {
                 var gui = new dat.GUI();
-                gui.add(settings, 'kickPower', 2, 15).name('Gentle Kick Force');
-                gui.add(settings, 'flightSpeed', 0.005, 0.05).name('Flight Slow-Mo');
+                // NEW: Dropdown for interaction mode
+                gui.add(settings, 'interactionMode', ['Launch', 'Pop']).name('Interaction Mode');
+                gui.add(settings, 'kickPower', 2, 15).name('Kick/Pop Force');
                 gui.add(settings, 'gravity', 0.05, 0.5).name('Floatiness');
                 gui.addColor(settings, 'bgColor').name('Room Hue');
-                gui.add(settings, 'cameraAlpha', 0, 1).name('Mirror Visibility');
-                gui.add(settings, 'cameraBlur', 0, 20).name('Mirror Softness');
+                
+                var mirrorFolder = gui.addFolder('Mirror Settings');
+                mirrorFolder.add(settings, 'cameraAlpha', 0, 1).name('Visibility');
+                mirrorFolder.add(settings, 'cameraBlur', 0, 20).name('Softness');
 
+                var touchFolder = gui.addFolder('Touch Indicator');
+                touchFolder.addColor(settings, 'indicatorColor').name('Color');
+                touchFolder.add(settings, 'indicatorSize', 5, 60).name('Size');
+                
             } catch(e) {}
 
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
             
-            for(var i=0; i<100; i++) {
-                skyParticles.push({
-                    x: Math.random() * window.innerWidth,
-                    y: Math.random() * window.innerHeight,
-                    size: Math.random() * 3 + 1,
-                    vx: 0, vy: 0,
-                    baseSpeed: Math.random() * 0.2 + 0.05
-                });
-            }
+            for(var i=0; i<100; i++) skyParticles.push({x: Math.random() * window.innerWidth, y: Math.random() * window.innerHeight, size: Math.random() * 3 + 1, vx: 0, vy: 0});
 
             resetObjects();
             trackMotion();
             gameLoop();
         }
-
-        function resetObjects() {
-            objects = [];
-            for (var i = 0; i < settings.ballCount; i++) objects.push(createObject('ball'));
-        }
-
-        function createObject(type) {
-            var floor = canvas.height * 0.85;
-            return {
-                type: type,
-                x: Math.random() * canvas.width,
-                y: floor - 40,
-                z: 0,
-                radius: Math.random() * 20 + 40,
-                vx: 0, vy: 0, vz: 0,
-                targetVx: 0, targetVy: 0,
-                colorHue: Math.floor(Math.random() * 360),
-                growth: 0.1
-            };
+        
+        // NEW: Function to create a particle explosion for the 'Pop' mode
+        function createPopExplosion(x, y, hue) {
+            var explosion = [];
+            var numParticles = 30; // Number of particles in an explosion
+            for (var i = 0; i < numParticles; i++) {
+                var angle = (i / numParticles) * Math.PI * 2;
+                var speed = Math.random() * settings.kickPower * 0.5 + 1;
+                explosion.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: 1.0, // Lifespan of the particle
+                    hue: hue,
+                    lightness: 70 + Math.random() * 20
+                });
+            }
+            popExplosions.push(explosion);
         }
 
         function trackMotion() {
@@ -141,26 +142,32 @@
                 mCtx.drawImage(video, 0, 0, 64, 48);
                 var current = mCtx.getImageData(0, 0, 64, 48).data;
                 gravityWells = [];
+                motionPoints = []; 
 
                 if (lastFrame) {
                     for (var i = 0; i < current.length; i += 4) {
                         if (Math.abs(current[i] - lastFrame[i]) > 45) {
-                            var x = ( (i/4)%64 / 64) * canvas.width; // Un-mirrored for motion tracking logic
+                            var x = ( (i/4)%64 / 64) * canvas.width; 
                             var yPerc = (Math.floor(i/4/64))/48;
                             var y = yPerc * canvas.height;
                             
-                            // SKY ZONE
-                            if (yPerc < 0.5) gravityWells.push({x: x, y: y});
-                            
-                            // FLOOR ZONE
+                            motionPoints.push({ x: x, y: y, life: 1.0 });
+
                             if (yPerc > 0.75) {
-                                objects.forEach(function(obj) {
+                                objects.forEach(function(obj, index) {
                                     var dx = obj.x - x;
                                     var dy = obj.y - y;
                                     if (Math.sqrt(dx*dx + dy*dy) < obj.radius + 40) {
-                                        obj.vz = settings.flightSpeed; 
-                                        obj.vy = -settings.kickPower;
-                                        obj.vx = (obj.x - x) * 0.15;
+                                        // NEW: Check which mode is active
+                                        if (settings.interactionMode === 'Launch') {
+                                            obj.vz = settings.flightSpeed; 
+                                            obj.vy = -settings.kickPower;
+                                            obj.vx = (obj.x - x) * 0.15;
+                                        } else { // 'Pop' mode
+                                            createPopExplosion(obj.x, obj.y, obj.colorHue);
+                                            objects[index] = createObject('ball'); // Replace the popped ball
+                                            objects[index].growth = 0;
+                                        }
                                     }
                                 });
                             }
@@ -176,45 +183,67 @@
         function gameLoop() {
             requestAnimationFrame(gameLoop);
             
-            // Background
             ctx.fillStyle = settings.bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // --- NEW: Draw Mirrored Camera Feed ---
-            if (video.readyState >= 3) {
-                ctx.save();
-                ctx.globalAlpha = settings.cameraAlpha;
-                ctx.filter = `blur(${settings.cameraBlur}px)`;
-                // Flip the canvas horizontally to create a mirror effect
-                ctx.scale(-1, 1);
-                ctx.translate(-canvas.width, 0);
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                ctx.restore();
-            }
-            // --- End of New Code ---
+            // Draw mirrored camera
+            ctx.save();
+            ctx.globalAlpha = settings.cameraAlpha;
+            ctx.filter = `blur(${settings.cameraBlur}px)`;
+            ctx.scale(-1, 1);
+            ctx.translate(-canvas.width, 0);
+            if (video.readyState >= 3) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
 
-            var floorY = canvas.height * 0.85;
-
-            // Update Sky
-            ctx.fillStyle = settings.particleColor;
-            skyParticles.forEach(function(p) {
-                p.x += p.vx; p.y += p.vy;
-                if (gravityWells.length > 0) {
-                    var w = gravityWells[0];
-                    p.vx += (w.x - p.x) * 0.001;
-                    p.vy += (w.y - p.y) * 0.001;
-                } else {
-                    p.vx *= 0.98; p.vy *= 0.98;
-                    p.vx += (Math.random()-0.5)*0.05;
-                    p.vy += (Math.random()-0.5)*0.05;
-                }
-                if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
-                if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
-                ctx.fillRect(p.x, p.y, p.size, p.size);
+            // Draw motion indicators
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.translate(-canvas.width, 0);
+            motionPoints.forEach(function(p) {
+                var grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, settings.indicatorSize * 1.5);
+                grad.addColorStop(0, settings.indicatorColor + '66');
+                grad.addColorStop(1, settings.indicatorColor + '00');
+                ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.arc(p.x, p.y, settings.indicatorSize * 1.5, 0, Math.PI * 2); ctx.fill();
             });
+            ctx.restore();
 
-            // Update Balls (rest of the function is the same)
-            objects.forEach(function(o, i) {
+            // Draw and update balls
+            drawAndUpdateBalls();
+
+            // NEW: Draw and update particle explosions
+            drawAndUpdatePops();
+            
+        }
+
+        // --- Helper functions for drawing ---
+        function drawAndUpdatePops() {
+            for (var i = popExplosions.length - 1; i >= 0; i--) {
+                var explosion = popExplosions[i];
+                for (var j = explosion.length - 1; j >= 0; j--) {
+                    var p = explosion[j];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += settings.gravity * 0.5; // Particles have some gravity
+                    p.life -= 0.03; // Fade out
+                    
+                    if (p.life <= 0) {
+                        explosion.splice(j, 1);
+                    } else {
+                        ctx.fillStyle = `hsla(${p.hue}, 80%, ${p.lightness}%, ${p.life})`;
+                        ctx.fillRect(p.x, p.y, 4, 4);
+                    }
+                }
+                if (explosion.length === 0) popExplosions.splice(i, 1);
+            }
+        }
+
+        function drawAndUpdateBalls() {
+             var floorY = canvas.height * 0.85;
+             objects.forEach(function(o, i) {
+                // Don't draw/update balls that are about to be replaced by a pop
+                if (!o) return;
+
                 if (o.growth < 1.0) o.growth += 0.02;
                 o.x += o.vx; o.y += o.vy; o.z += o.vz;
                 o.vy += settings.gravity;
@@ -223,17 +252,18 @@
                 var r = o.radius * scale;
                 if (o.y + r > floorY) {
                     o.y = floorY - r;
-                    o.vy *= -0.5;
-                    o.vz *= 0.5;
+                    o.vy *= -0.5; o.vz *= 0.5;
                 }
                 if (o.z > 0.9 || o.x < -100 || o.x > canvas.width + 100) {
                     objects[i] = createObject('ball');
                     objects[i].growth = 0;
                 }
+                // Shadow
                 ctx.fillStyle = 'rgba(0,0,0,0.06)';
                 ctx.beginPath();
                 ctx.ellipse(o.x, floorY, r, r * 0.2, 0, 0, Math.PI * 2);
                 ctx.fill();
+                // Ball
                 var grd = ctx.createRadialGradient(o.x - r*0.3, o.y - r*0.3, r*0.1, o.x, o.y, r);
                 grd.addColorStop(0, 'hsl('+o.colorHue+', 80%, 85%)');
                 grd.addColorStop(0.6, 'hsl('+o.colorHue+', 75%, 60%)');
@@ -244,12 +274,24 @@
                 ctx.fill();
             });
         }
-
+        
+        // --- Utility functions (no changes) ---
+        function resetObjects() {
+            objects = [];
+            for (var i = 0; i < settings.ballCount; i++) objects.push(createObject('ball'));
+        }
+        function createObject(type) {
+            var floor = canvas.height * 0.85;
+            return {
+                type: type, x: Math.random() * canvas.width, y: floor - 40, z: 0,
+                radius: Math.random() * 20 + 40, vx: 0, vy: 0, vz: 0,
+                colorHue: Math.floor(Math.random() * 360), growth: 0.1
+            };
+        }
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
         }
-
         document.addEventListener('keydown', function(e) {
             if (e.key.toLowerCase() === 'f') document.documentElement.requestFullscreen();
         });
