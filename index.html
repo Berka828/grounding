@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <title>Gentle Playroom - Sensory Soft-Launch</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #ffffff; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
-        #webcam { display: none; }
+        #webcam { transform: scaleX(-1); display: none; } /* Mirrored and hidden */
         #ui {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -58,7 +58,9 @@
             airDrag: 0.94,       // High air resistance to slow things down
             ballCount: 7,
             bgColor: '#f9f9fb',
-            particleColor: '#aab7c4'
+            particleColor: '#aab7c4',
+            cameraAlpha: 0.2,    // Controls transparency of the camera feed
+            cameraBlur: 4        // Controls the blurriness of the camera feed
         };
 
         function startApp() {
@@ -86,6 +88,9 @@
                 gui.add(settings, 'flightSpeed', 0.005, 0.05).name('Flight Slow-Mo');
                 gui.add(settings, 'gravity', 0.05, 0.5).name('Floatiness');
                 gui.addColor(settings, 'bgColor').name('Room Hue');
+                gui.add(settings, 'cameraAlpha', 0, 1).name('Mirror Visibility');
+                gui.add(settings, 'cameraBlur', 0, 20).name('Mirror Softness');
+
             } catch(e) {}
 
             resizeCanvas();
@@ -140,7 +145,7 @@
                 if (lastFrame) {
                     for (var i = 0; i < current.length; i += 4) {
                         if (Math.abs(current[i] - lastFrame[i]) > 45) {
-                            var x = (1.0 - ((i/4)%64)/64) * canvas.width;
+                            var x = ( (i/4)%64 / 64) * canvas.width; // Un-mirrored for motion tracking logic
                             var yPerc = (Math.floor(i/4/64))/48;
                             var y = yPerc * canvas.height;
                             
@@ -153,8 +158,6 @@
                                     var dx = obj.x - x;
                                     var dy = obj.y - y;
                                     if (Math.sqrt(dx*dx + dy*dy) < obj.radius + 40) {
-                                        // GENTLE LAUNCH: We set a "Target" velocity that the ball
-                                        // smoothly accelerates towards, rather than snapping.
                                         obj.vz = settings.flightSpeed; 
                                         obj.vy = -settings.kickPower;
                                         obj.vx = (obj.x - x) * 0.15;
@@ -172,8 +175,23 @@
 
         function gameLoop() {
             requestAnimationFrame(gameLoop);
+            
+            // Background
             ctx.fillStyle = settings.bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // --- NEW: Draw Mirrored Camera Feed ---
+            if (video.readyState >= 3) {
+                ctx.save();
+                ctx.globalAlpha = settings.cameraAlpha;
+                ctx.filter = `blur(${settings.cameraBlur}px)`;
+                // Flip the canvas horizontally to create a mirror effect
+                ctx.scale(-1, 1);
+                ctx.translate(-canvas.width, 0);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                ctx.restore();
+            }
+            // --- End of New Code ---
 
             var floorY = canvas.height * 0.85;
 
@@ -195,45 +213,31 @@
                 ctx.fillRect(p.x, p.y, p.size, p.size);
             });
 
-            // Update Balls
+            // Update Balls (rest of the function is the same)
             objects.forEach(function(o, i) {
                 if (o.growth < 1.0) o.growth += 0.02;
-
-                // Physics with high air drag
-                o.x += o.vx;
-                o.y += o.vy;
-                o.z += o.vz;
-                
+                o.x += o.vx; o.y += o.vy; o.z += o.vz;
                 o.vy += settings.gravity;
-                o.vx *= settings.airDrag;
-                o.vy *= settings.airDrag;
-                
+                o.vx *= settings.airDrag; o.vy *= settings.airDrag;
                 var scale = (1.0 - (o.z * 0.75)) * o.growth;
                 var r = o.radius * scale;
-
                 if (o.y + r > floorY) {
                     o.y = floorY - r;
-                    o.vy *= -0.5; // Soft bounce
-                    o.vz *= 0.5;  // Slow down 3D travel on floor hit
+                    o.vy *= -0.5;
+                    o.vz *= 0.5;
                 }
-
                 if (o.z > 0.9 || o.x < -100 || o.x > canvas.width + 100) {
                     objects[i] = createObject('ball');
                     objects[i].growth = 0;
                 }
-
-                // Shadow
                 ctx.fillStyle = 'rgba(0,0,0,0.06)';
                 ctx.beginPath();
                 ctx.ellipse(o.x, floorY, r, r * 0.2, 0, 0, Math.PI * 2);
                 ctx.fill();
-
-                // Realistic Shading
                 var grd = ctx.createRadialGradient(o.x - r*0.3, o.y - r*0.3, r*0.1, o.x, o.y, r);
                 grd.addColorStop(0, 'hsl('+o.colorHue+', 80%, 85%)');
                 grd.addColorStop(0.6, 'hsl('+o.colorHue+', 75%, 60%)');
                 grd.addColorStop(1, 'hsl('+o.colorHue+', 70%, 40%)');
-                
                 ctx.beginPath();
                 ctx.arc(o.x, o.y, r, 0, Math.PI * 2);
                 ctx.fillStyle = grd;
