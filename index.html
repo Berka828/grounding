@@ -19,16 +19,14 @@
         }
         button:hover { background-color: #2980b9; transform: scale(1.05); }
         #log { margin-top: 20px; font-family: monospace; color: #888; }
-        
         .dg.ac { z-index: 50 !important; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
 </head>
 <body>
-
     <div id="ui">
         <h1 style="letter-spacing: 2px; font-weight: 300;">GENTLE PLAYROOM</h1>
-        <p style="color: #666; margin-bottom: 30px;">Slow and gentle movements create the best magic.</p>
+        <p style="color: #666; margin-bottom: 30px;">Interact with a world of gentle magic.</p>
         <button onclick="startApp()">START EXPERIENCE</button>
         <div id="log">Sensors Calibrated</div>
     </div>
@@ -42,20 +40,20 @@
         var canvas = document.getElementById('gameCanvas');
         var ctx = canvas.getContext('2d');
 
-        var objects = [], skyParticles = [], motionPoints = [], popExplosions = [];
-        var lastFrame = null, engineBooted = false, gravityWells = [];
-        
+        var objects = [], motionPoints = [], popExplosions = [], ripples = []; // NEW: Added ripples array
+        var lastFrame = null, engineBooted = false;
         var activeInteractionMode = 'Launch'; 
         var modeNotification = { text: '', life: 0 }; 
 
         var settings = {
             interactionMode: 'Random', 
-            gravity: 0.2, kickPower: 8, flightSpeed: 0.02, airDrag: 0.94, ballCount: 7,
-            bgColor: '#f9f9fb', particleColor: '#aab7c4', cameraAlpha: 0.2, cameraBlur: 4,
+            objectCount: 15, // RENAMED from ballCount
+            gravity: 0.2, kickPower: 8,
+            bgColor: '#f9f9fb', cameraAlpha: 0.2, cameraBlur: 4,
             indicatorColor: '#ffffff', indicatorSize: 30,
         };
 
-        function startApp() {
+        function startApp() { /* (no changes) */
             log.innerText = "Initializing sensory sensors...";
             navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
                 video.srcObject = stream;
@@ -74,15 +72,12 @@
         function initGame() {
             try {
                 var gui = new dat.GUI();
-                gui.add(settings, 'interactionMode', ['Launch', 'Pop', 'Random']).name('Interaction Mode');
-                gui.add(settings, 'kickPower', 2, 15).name('Kick/Pop Force');
+                gui.add(settings, 'interactionMode', ['Launch', 'Pop', 'Random']).name('Ball Interaction');
+                gui.add(settings, 'objectCount', 5, 30).name('Object Count').onFinishChange(resetObjects);
                 gui.addColor(settings, 'bgColor').name('Room Hue');
                 var mirrorFolder = gui.addFolder('Mirror Settings');
                 mirrorFolder.add(settings, 'cameraAlpha', 0, 1).name('Visibility');
                 mirrorFolder.add(settings, 'cameraBlur', 0, 20).name('Softness');
-                var touchFolder = gui.addFolder('Touch Indicator');
-                touchFolder.addColor(settings, 'indicatorColor').name('Color');
-                touchFolder.add(settings, 'indicatorSize', 5, 60).name('Size');
             } catch(e) {}
 
             resizeCanvas();
@@ -96,18 +91,18 @@
             gameLoop();
         }
 
-        function cycleInteractionMode() {
+        function cycleInteractionMode() { /* (no changes) */
             if (settings.interactionMode === 'Random') {
                 activeInteractionMode = (activeInteractionMode === 'Launch') ? 'Pop' : 'Launch';
                 showModeChangeNotification(activeInteractionMode);
             }
         }
         
-        function showModeChangeNotification(mode) {
-            modeNotification.text = `Mode: ${mode}`;
+        function showModeChangeNotification(mode) { /* (no changes) */
+            modeNotification.text = `Ball Mode: ${mode}`;
             modeNotification.life = 1.0;
         }
-        
+
         function trackMotion() {
             var mCanvas = document.createElement('canvas');
             var mCtx = mCanvas.getContext('2d', { willReadFrequently: true });
@@ -122,35 +117,38 @@
                 if (lastFrame) {
                     for (var i = 0; i < current.length; i += 4) {
                         if (Math.abs(current[i] - lastFrame[i]) > 45) {
-                            
-                            // *** THIS IS THE FIX ***
-                            // The raw camera data is not mirrored, so we must manually flip the x-coordinate
-                            // to match the mirrored display. (1.0 - coordinate) flips it.
                             var x = (1.0 - (((i/4) % 64) / 64)) * canvas.width;
-                            
                             var yPerc = (Math.floor(i/4/64))/48;
                             var y = yPerc * canvas.height;
                             motionPoints.push({ x: x, y: y });
 
-                            if (yPerc > 0.75) {
-                                objects.forEach((obj, index) => {
-                                    if (!obj) return;
-                                    var dx = obj.x - x, dy = obj.y - y;
-                                    if (Math.sqrt(dx*dx + dy*dy) < obj.radius + 40) {
-                                        if (activeInteractionMode === 'Launch') {
-                                            obj.vz = settings.flightSpeed; 
-                                            obj.vy = -settings.kickPower;
-                                            obj.vx = (obj.x - x) * 0.15;
-                                        } else { // 'Pop' mode
-                                            createPopExplosion(obj.x, obj.y, obj.colorHue);
-                                            objects.splice(index, 1); 
-                                            setTimeout(() => {
-                                                if (objects.length < settings.ballCount) objects.push(createObject('ball'))
-                                            }, 500); 
-                                        }
+                            // *** MODIFIED: Interaction logic for different object types ***
+                            objects.forEach((obj, index) => {
+                                if (!obj) return;
+                                var dx = obj.x - x, dy = obj.y - y;
+                                if (Math.sqrt(dx*dx + dy*dy) < (obj.radius || settings.indicatorSize) + 30) {
+                                    switch(obj.type) {
+                                        case 'ball':
+                                            if (activeInteractionMode === 'Launch') {
+                                                obj.vy = -settings.kickPower;
+                                                obj.vx = (obj.x - x) * 0.15;
+                                            } else { // 'Pop' mode
+                                                createPopExplosion(obj.x, obj.y, obj.colorHue);
+                                                objects[index] = createObject();
+                                            }
+                                            break;
+                                        case 'leaf':
+                                            // Give it a gentle push upwards and sideways
+                                            obj.vy = -settings.kickPower * 0.5;
+                                            obj.vx += (obj.x - x) * 0.1;
+                                            break;
+                                        case 'puddle':
+                                            // Create a ripple effect
+                                            ripples.push({x: obj.x, y: obj.y, radius: 20, life: 1.0});
+                                            break;
                                     }
-                                });
-                            }
+                                }
+                            });
                         }
                     }
                 }
@@ -173,13 +171,153 @@
 
             drawMirroredCamera();
             drawTouchIndicators();
-            drawAndUpdateBalls();
+            drawAndUpdateObjects(); // RENAMED from drawAndUpdateBalls
             drawAndUpdatePops();
+            drawAndUpdateRipples(); // NEW
             drawNotifications();
         }
 
-        // --- Drawing and Update Functions ---
-        function drawMirroredCamera() {
+        // RENAMED from drawAndUpdateBalls
+        function drawAndUpdateObjects() {
+             var floorY = canvas.height * 0.85;
+             objects.forEach((obj, i) => {
+                if (!obj) return;
+                
+                // Call the correct update function based on type
+                switch(obj.type) {
+                    case 'ball': updateBall(obj, floorY); break;
+                    case 'leaf': updateLeaf(obj, floorY); break;
+                    case 'puddle': updatePuddle(obj, floorY); break;
+                }
+
+                // Call the correct draw function
+                ctx.save();
+                switch(obj.type) {
+                    case 'ball': drawBall(obj, floorY); break;
+                    case 'leaf': drawLeaf(obj, floorY); break;
+                    case 'puddle': drawPuddle(obj, floorY); break;
+                }
+                ctx.restore();
+
+                // Respawn logic
+                if (obj.y > canvas.height + 50) {
+                    objects[i] = createObject();
+                }
+            });
+        }
+        
+        // --- NEW: Specific update and draw functions for each object type ---
+
+        function updateBall(o, floorY) {
+            o.vy += settings.gravity;
+            o.x += o.vx; o.y += o.vy;
+            o.vx *= 0.94; o.vy *= 0.94;
+            if (o.y + o.radius > floorY) {
+                o.y = floorY - o.radius; o.vy *= -0.4;
+            }
+        }
+        function drawBall(o, floorY) {
+            // Shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.06)';
+            ctx.beginPath(); ctx.ellipse(o.x, floorY, o.radius, o.radius * 0.2, 0, 0, 2*Math.PI); ctx.fill();
+            // Ball
+            var grd = ctx.createRadialGradient(o.x-o.radius*0.3, o.y-o.radius*0.3, o.radius*0.1, o.x, o.y, o.radius);
+            grd.addColorStop(0, `hsl(${o.colorHue}, 80%, 85%)`);
+            grd.addColorStop(1, `hsl(${o.colorHue}, 70%, 40%)`);
+            ctx.beginPath(); ctx.arc(o.x, o.y, o.radius, 0, 2*Math.PI); ctx.fillStyle = grd; ctx.fill();
+        }
+
+        function updateLeaf(o, floorY) {
+            o.vy += settings.gravity * 0.2; // Leaves are lighter
+            o.vx += (Math.random() - 0.5) * 0.2; // Add a gentle side-to-side drift
+            o.x += o.vx; o.y += o.vy;
+            o.vx *= 0.96; o.vy *= 0.98;
+            o.rotation += o.rotationSpeed;
+            if (o.y + o.radius > floorY) {
+                o.y = floorY - o.radius; o.vy = 0; o.vx *= 0.8;
+            }
+        }
+        function drawLeaf(o, floorY) {
+            ctx.translate(o.x, o.y);
+            ctx.rotate(o.rotation);
+            ctx.fillStyle = `hsl(${o.colorHue}, 60%, 50%)`;
+            ctx.beginPath();
+            ctx.moveTo(0, -o.radius);
+            ctx.quadraticCurveTo(o.radius, 0, 0, o.radius);
+            ctx.quadraticCurveTo(-o.radius, 0, 0, -o.radius);
+            ctx.fill();
+        }
+
+        function updatePuddle(o, floorY) {
+            // Puddles don't move
+            o.y = floorY;
+        }
+        function drawPuddle(o, floorY) {
+            ctx.fillStyle = 'rgba(100, 150, 255, 0.3)';
+            ctx.beginPath();
+            ctx.ellipse(o.x, o.y, o.radius, o.radius * 0.3, 0, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        // NEW: Function to draw the ripple animations
+        function drawAndUpdateRipples() {
+            for (let i = ripples.length - 1; i >= 0; i--) {
+                let r = ripples[i];
+                r.radius += 1.5;
+                r.life -= 0.02;
+                if (r.life <= 0) {
+                    ripples.splice(i, 1);
+                } else {
+                    ctx.strokeStyle = `rgba(100, 150, 255, ${r.life * 0.5})`;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.ellipse(r.x, r.y, r.radius, r.radius * 0.3, 0, 0, 2 * Math.PI);
+                    ctx.stroke();
+                }
+            }
+        }
+        
+        // --- Utility and other drawing functions (minor changes) ---
+
+        function resetObjects() {
+            objects = [];
+            for (var i = 0; i < settings.objectCount; i++) {
+                objects.push(createObject());
+            }
+        }
+
+        // MODIFIED: This now creates one of three types of objects
+        function createObject() {
+            var floorY = canvas.height * 0.85;
+            var objectType = ['ball', 'leaf', 'puddle'][Math.floor(Math.random() * 3)];
+            
+            let newObj = {
+                type: objectType,
+                x: Math.random() * canvas.width,
+                y: Math.random() * floorY * 0.8,
+                vx: (Math.random() - 0.5) * 2,
+                vy: (Math.random() - 0.5) * 2,
+                radius: Math.random() * 20 + 30
+            };
+
+            switch(objectType) {
+                case 'ball':
+                    newObj.colorHue = Math.floor(Math.random() * 360);
+                    break;
+                case 'leaf':
+                    newObj.colorHue = Math.random() * 40 + 80; // Greens and yellows
+                    newObj.rotation = Math.random() * Math.PI * 2;
+                    newObj.rotationSpeed = (Math.random() - 0.5) * 0.04;
+                    break;
+                case 'puddle':
+                    newObj.y = floorY; // Puddles are always on the floor
+                    newObj.radius = Math.random() * 40 + 40;
+                    break;
+            }
+            return newObj;
+        }
+
+        function drawMirroredCamera() { /* (no changes) */
             ctx.save();
             ctx.globalAlpha = settings.cameraAlpha;
             ctx.filter = `blur(${settings.cameraBlur}px)`;
@@ -188,47 +326,14 @@
             if (video.readyState >= 3) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             ctx.restore();
         }
-
-        function drawTouchIndicators() {
-            // No flipping needed here because the 'x' coordinate from trackMotion is now correctly pre-flipped.
+        function drawTouchIndicators() { /* (no changes) */
             motionPoints.forEach(p => {
                 var grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, settings.indicatorSize * 1.5);
-                grad.addColorStop(0, settings.indicatorColor + '66');
-                grad.addColorStop(1, settings.indicatorColor + '00');
-                ctx.fillStyle = grad;
-                ctx.beginPath(); ctx.arc(p.x, p.y, settings.indicatorSize * 1.5, 0, 2*Math.PI); ctx.fill();
+                grad.addColorStop(0, settings.indicatorColor + '66'); grad.addColorStop(1, settings.indicatorColor + '00');
+                ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(p.x, p.y, settings.indicatorSize * 1.5, 0, 2*Math.PI); ctx.fill();
             });
         }
-
-        function drawAndUpdateBalls() {
-             var floorY = canvas.height * 0.85;
-             objects.forEach((o, i) => {
-                if (!o) return;
-                if (o.growth < 1.0) o.growth += 0.04;
-                o.x += o.vx; o.y += o.vy; o.z += o.vz;
-                o.vy += settings.gravity;
-                o.vx *= settings.airDrag; o.vy *= settings.airDrag;
-                var scale = (1 - (o.z * 0.75)) * o.growth;
-                var r = o.radius * scale;
-                if (o.y + r > floorY) {
-                    o.y = floorY - r; o.vy *= -0.5; o.vz *= 0.5;
-                }
-                if (o.z > 1 || o.x < -100 || o.x > canvas.width + 100) {
-                    objects.splice(i, 1);
-                    if (objects.length < settings.ballCount) objects.push(createObject('ball'));
-                }
-                // Shadow
-                ctx.fillStyle = 'rgba(0,0,0,0.06)';
-                ctx.beginPath(); ctx.ellipse(o.x, floorY, r, r*0.2, 0, 0, 2*Math.PI); ctx.fill();
-                // Ball
-                var grd = ctx.createRadialGradient(o.x-r*0.3, o.y-r*0.3, r*0.1, o.x, o.y, r);
-                grd.addColorStop(0, `hsl(${o.colorHue}, 80%, 85%)`);
-                grd.addColorStop(1, `hsl(${o.colorHue}, 70%, 40%)`);
-                ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, 2*Math.PI); ctx.fillStyle = grd; ctx.fill();
-            });
-        }
-        
-        function createPopExplosion(x, y, hue) {
+        function createPopExplosion(x, y, hue) { /* (no changes) */
             var numParticles = 30;
             for (let i = 0; i < numParticles; i++) {
                 var angle = (i/numParticles) * 2 * Math.PI, speed = Math.random() * settings.kickPower * 0.5 + 1;
@@ -238,45 +343,19 @@
                 });
             }
         }
-
-        function drawAndUpdatePops() {
+        function drawAndUpdatePops() { /* (no changes) */
             for (let i = popExplosions.length - 1; i >= 0; i--) {
-                let p = popExplosions[i];
-                p.x += p.vx; p.y += p.vy;
-                p.vy += settings.gravity * 0.5;
-                p.life -= 0.03;
+                let p = popExplosions[i]; p.x += p.vx; p.y += p.vy; p.vy += settings.gravity * 0.5; p.life -= 0.03;
                 if (p.life <= 0) popExplosions.splice(i, 1);
-                else {
-                    ctx.fillStyle = `hsla(${p.hue}, 80%, ${p.lightness}%, ${p.life})`;
-                    ctx.fillRect(p.x, p.y, 4, 4);
-                }
+                else { ctx.fillStyle = `hsla(${p.hue}, 80%, ${p.lightness}%, ${p.life})`; ctx.fillRect(p.x, p.y, 4, 4); }
             }
         }
-        
-        function drawNotifications() {
-            if (modeNotification.life > 0) {
-                modeNotification.life -= 0.01; 
-                ctx.save();
-                ctx.globalAlpha = Math.min(1, modeNotification.life * 3); 
-                ctx.fillStyle = '#333333';
-                ctx.font = 'bold 30px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(modeNotification.text, canvas.width / 2, 50);
-                ctx.restore();
+        function drawNotifications() { /* (no changes) */
+             if (modeNotification.life > 0) {
+                modeNotification.life -= 0.01; ctx.save(); ctx.globalAlpha = Math.min(1, modeNotification.life * 3); 
+                ctx.fillStyle = '#333333'; ctx.font = 'bold 30px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText(modeNotification.text, canvas.width / 2, 50); ctx.restore();
             }
-        }
-        
-        function resetObjects() {
-            while(objects.length > 0) objects.pop();
-            while(objects.length < settings.ballCount) objects.push(createObject('ball'));
-        }
-        function createObject() {
-            var floor = canvas.height * 0.85;
-            return {
-                x: Math.random() * canvas.width, y: floor - 40, z: 0,
-                radius: Math.random() * 20 + 40, vx: 0, vy: 0, vz: 0,
-                colorHue: Math.floor(Math.random() * 360), growth: 0.1
-            };
         }
         function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
         document.addEventListener('keydown', e => { if (e.key.toLowerCase() === 'f') document.documentElement.requestFullscreen(); });
