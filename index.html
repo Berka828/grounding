@@ -53,21 +53,20 @@
         var pentatonicScale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33]; 
 
         var magicMeter = 0;
+        var displayMagicMeter = 0; // NEW: Used for smooth visual transitioning of the thermometer
         var magicEventActive = false;
         var magicEventTimer = 0;
         var confetti = [];
-        var sonicRings = []; // NEW: Array for the sonic ring explosion
+        var sonicRings = []; 
 
-        // NEW: BxCM Vibrant Brand Colors for Leaves (Purple, Orange, Cyan, Lime, Magenta)
         var bxcmHues = [280, 30, 190, 90, 330];
 
-        // FULLY EXPANDED SETTINGS
         var settings = {
             interactionMode: 'Random', 
             objectCount: 15, 
-            floorLevel: 0.95,       // NEW: Lowered floor default
-            magicFillSpeed: 1.0,    // NEW: Multiplier for thermometer
-            soundEnabled: true,     // NEW: Sound toggle
+            floorLevel: 0.95,       
+            magicFillSpeed: 1.0,    
+            soundEnabled: true,     
             gravity: 0.2, 
             kickPower: 8,
             bgColor: '#f9f9fb', 
@@ -84,7 +83,7 @@
         }
 
         function playChime() {
-            if (!settings.soundEnabled || !audioCtx) return; // Honors the sound toggle
+            if (!settings.soundEnabled || !audioCtx) return; 
             var freq = pentatonicScale[Math.floor(Math.random() * pentatonicScale.length)];
             var osc = audioCtx.createOscillator();
             var gainNode = audioCtx.createGain();
@@ -105,40 +104,28 @@
 
         function addMagic(amount) {
             if (magicEventActive) return; 
-            magicMeter += amount * settings.magicFillSpeed; // Applies the custom fill speed
+            magicMeter += amount * settings.magicFillSpeed; 
             if (magicMeter >= 100) triggerMagicEvent();
         }
 
         function triggerMagicEvent() {
             magicMeter = 100;
             magicEventActive = true;
-            magicEventTimer = 300; 
-            
+            magicEventTimer = 400; // Increased duration for a slower, gentler event
             sonicRings = [];
             confetti = [];
             
-            // Initial burst of sonic rings
-            for (let i = 0; i < 4; i++) {
-                createSonicRing(i * 40);
-            }
-
-            // Confetti
-            for (let i = 0; i < 150; i++) {
-                confetti.push({
-                    x: Math.random() * canvas.width, y: -Math.random() * canvas.height, 
-                    vx: (Math.random() - 0.5) * 4, vy: Math.random() * 3 + 2,
-                    color: Math.random() > 0.5 ? '#FFD700' : '#FFA500', 
-                    size: Math.random() * 8 + 6, rotation: Math.random() * Math.PI * 2, rs: (Math.random() - 0.5) * 0.2
-                });
-            }
+            // Spawn just ONE very soft initial ring
+            createSonicRing(10);
         }
 
+        // NEW: Gentle Sonic Rings
         function createSonicRing(startRadius = 10) {
             sonicRings.push({
                 x: canvas.width / 2, y: canvas.height / 2,
                 radius: startRadius,
-                color: `hsl(${Math.random() * 360}, 100%, 55%)`,
-                thickness: Math.random() * 20 + 15,
+                color: `hsl(${Math.random() * 360}, 60%, 75%)`, // Softer pastel colors
+                thickness: Math.random() * 15 + 10,
                 life: 1.0
             });
         }
@@ -164,7 +151,6 @@
             try {
                 var gui = new dat.GUI();
                 
-                // COMPREHENSIVE SETTINGS MENUS
                 var mainFolder = gui.addFolder('Main Gameplay');
                 mainFolder.add(settings, 'interactionMode', ['Launch', 'Pop', 'Random']).name('Ball Mode');
                 mainFolder.add(settings, 'objectCount', 5, 40).name('Total Objects').onFinishChange(resetObjects);
@@ -316,10 +302,10 @@
             drawMirroredCamera();
 
             if (magicEventActive) {
-                // Flash the room gently
+                // Gentle, warm ambient glow instead of flashing white
                 ctx.save();
-                ctx.globalAlpha = (magicEventTimer / 300) * 0.3;
-                ctx.fillStyle = '#ffffff';
+                ctx.globalAlpha = Math.min((magicEventTimer / 400) * 0.15, 0.15); // Very subtle
+                ctx.fillStyle = '#FFFAF0'; 
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.restore();
             }
@@ -332,8 +318,20 @@
             drawAndUpdateRipples(); 
 
             if (magicEventActive) {
-                // Pulse new rings periodically
-                if (magicEventTimer % 25 === 0) createSonicRing();
+                // Very gentle ring spawning (every 80 frames instead of 25)
+                if (magicEventTimer % 80 === 0 && magicEventTimer > 100) createSonicRing();
+                
+                // Continuous, gentle spawning of soft magic dust (confetti)
+                if (magicEventTimer > 100 && confetti.length < 80 && Math.random() > 0.5) {
+                    confetti.push({
+                        x: Math.random() * canvas.width, y: -20, 
+                        vx: Math.sin(magicEventTimer * 0.05) * 2, // Gentle horizontal sway
+                        vy: Math.random() * 1.5 + 1.0,            // Slow drifting fall
+                        color: Math.random() > 0.5 ? '#FFFACD' : '#FFE4B5', // Pastel golds
+                        size: Math.random() * 6 + 4, rotation: Math.random() * Math.PI * 2, rs: (Math.random() - 0.5) * 0.05,
+                        opacity: 0 // Starts invisible and fades in
+                    });
+                }
                 
                 drawAndUpdateSonicRings();
                 drawAndUpdateConfetti();
@@ -348,46 +346,52 @@
             drawNotifications();
         }
 
-        // --- UPDATED: Gradient Thermometer ---
+        // --- UPDATED: Smooth & Clear Thermometer ---
         function drawMagicMeter() {
-            var barWidth = 25;
+            var barWidth = 30;
             var barHeight = canvas.height * 0.5;
-            var x = 30; 
+            var x = 40; 
             var y = (canvas.height / 2) - (barHeight / 2);
 
-            ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)';
-            ctx.lineWidth = 3;
-            ctx.strokeRect(x, y, barWidth, barHeight);
+            // Interpolate the visual level towards the actual meter value (Smooth glide)
+            displayMagicMeter += (magicMeter - displayMagicMeter) * 0.05;
 
-            var fillHeight = (magicMeter / 100) * barHeight;
+            // 1. Draw the clear "Empty" background container
+            ctx.fillStyle = 'rgba(40, 40, 40, 0.4)'; // Dark translucent track
+            ctx.fillRect(x, y, barWidth, barHeight);
+
+            // 2. Draw the liquid fill
+            var fillHeight = (displayMagicMeter / 100) * barHeight;
             var fillY = y + barHeight - fillHeight;
 
-            // Create Red to Green Gradient
             var grad = ctx.createLinearGradient(x, y + barHeight, x, y);
-            grad.addColorStop(0, '#ff4444');    // Red at bottom
-            grad.addColorStop(0.5, '#ffeb3b');  // Yellow in middle
-            grad.addColorStop(1, '#00C851');    // Green at top
+            grad.addColorStop(0, '#ff4444');    
+            grad.addColorStop(0.5, '#ffeb3b');  
+            grad.addColorStop(1, '#00C851');    
 
             ctx.save();
-            ctx.shadowColor = 'rgba(255, 255, 255, 0.3)';
-            ctx.shadowBlur = 10;
             ctx.fillStyle = grad;
             ctx.fillRect(x, fillY, barWidth, fillHeight);
             ctx.restore();
+
+            // 3. Draw the crisp white boundary lines (shows top and bottom limits clearly)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(x, y, barWidth, barHeight);
         }
 
-        // --- NEW: Sonic Rings Drawing Logic ---
+        // --- UPDATED: Gentle Sonic Rings ---
         function drawAndUpdateSonicRings() {
             for (let i = sonicRings.length - 1; i >= 0; i--) {
                 let r = sonicRings[i];
-                r.radius += 20; // Expands outward quickly
-                r.life -= 0.015; // Fades out
+                r.radius += 3; // EXPANDS VERY SLOWLY NOW
+                r.life -= 0.005; // FADES VERY SLOWLY NOW
                 
                 if (r.life <= 0) {
                     sonicRings.splice(i, 1);
                 } else {
                     ctx.save();
-                    ctx.globalAlpha = r.life;
+                    ctx.globalAlpha = r.life * 0.5; // Max opacity is only 50% so it's not jarring
                     ctx.strokeStyle = r.color;
                     ctx.lineWidth = r.thickness;
                     ctx.beginPath();
@@ -398,19 +402,30 @@
             }
         }
 
+        // --- UPDATED: Gentle Confetti / Magic Dust ---
         function drawAndUpdateConfetti() {
              for (let i = 0; i < confetti.length; i++) {
                 let c = confetti[i];
                 c.x += c.vx; c.y += c.vy; c.rotation += c.rs;
+                
+                // Fade in gently
+                if (c.opacity < 1.0 && magicEventTimer > 60) {
+                    c.opacity += 0.05;
+                }
+                // Fade out at the end of the event
+                if (magicEventTimer <= 60) {
+                    c.opacity = Math.max(0, magicEventTimer / 60);
+                }
+
                 ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.rotation);
-                ctx.globalAlpha = (magicEventTimer < 60) ? magicEventTimer / 60 : 1.0; 
+                ctx.globalAlpha = c.opacity; 
                 ctx.fillStyle = c.color; ctx.fillRect(-c.size/2, -c.size/2, c.size, c.size * 0.6); ctx.restore();
                 if (c.x < 0) c.x = canvas.width; if (c.x > canvas.width) c.x = 0;
             }
         }
 
         function drawAndUpdateObjects() {
-             var floorY = canvas.height * settings.floorLevel; // Dynamic Floor
+             var floorY = canvas.height * settings.floorLevel; 
              objects.forEach((obj, i) => {
                 if (!obj) return;
                 
@@ -451,7 +466,7 @@
             if (o.y + o.radius > floorY) { o.y = floorY - o.radius; o.vy = 0; o.vx *= 0.8; }
         }
         function drawLeaf(o, floorY) {
-            ctx.translate(o.x, o.y); ctx.rotate(o.rotation); ctx.fillStyle = `hsl(${o.colorHue}, 70%, 55%)`; // Brighter leaf saturation
+            ctx.translate(o.x, o.y); ctx.rotate(o.rotation); ctx.fillStyle = `hsl(${o.colorHue}, 70%, 55%)`; 
             ctx.beginPath(); ctx.moveTo(0, -o.radius); ctx.quadraticCurveTo(o.radius, 0, 0, o.radius);
             ctx.quadraticCurveTo(-o.radius, 0, 0, -o.radius); ctx.fill();
         }
@@ -506,7 +521,6 @@
                     newObj.colorHue = Math.floor(Math.random() * 360);
                     break;
                 case 'leaf':
-                    // UPDATED: Now uses BxCM-style branding colors!
                     newObj.colorHue = bxcmHues[Math.floor(Math.random() * bxcmHues.length)];
                     newObj.rotation = Math.random() * Math.PI * 2;
                     newObj.rotationSpeed = (Math.random() - 0.5) * 0.04;
