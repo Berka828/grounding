@@ -23,7 +23,6 @@
         
         .dg.ac { z-index: 50 !important; transition: opacity 0.3s; }
         
-        /* NEW: Hides UI elements when in fullscreen presentation mode */
         body.fullscreen .dg.ac { opacity: 0; pointer-events: none; }
         body.fullscreen #ui { display: none !important; }
     </style>
@@ -56,7 +55,8 @@
             objectCount: 15, 
             gravity: 0.2, kickPower: 8,
             bgColor: '#f9f9fb', cameraAlpha: 0.2, cameraBlur: 4,
-            indicatorColor: '#ffffff', indicatorSize: 30, // Restored UI settings!
+            indicatorColor: '#ffffff', indicatorSize: 30,
+            puddleSize: 120 // NEW: Base size for puddles
         };
 
         function startApp() {
@@ -82,11 +82,14 @@
                 gui.add(settings, 'objectCount', 5, 30).name('Object Count').onFinishChange(resetObjects);
                 gui.addColor(settings, 'bgColor').name('Room Hue');
                 
+                // NEW: Environment folder for the puddle size
+                var envFolder = gui.addFolder('Environment');
+                envFolder.add(settings, 'puddleSize', 50, 300).name('Puddle Base Size');
+
                 var mirrorFolder = gui.addFolder('Mirror Settings');
                 mirrorFolder.add(settings, 'cameraAlpha', 0, 1).name('Visibility');
                 mirrorFolder.add(settings, 'cameraBlur', 0, 20).name('Softness');
                 
-                // RESTORED: Touch Indicator settings
                 var touchFolder = gui.addFolder('Touch Indicator');
                 touchFolder.addColor(settings, 'indicatorColor').name('Color');
                 touchFolder.add(settings, 'indicatorSize', 5, 60).name('Size');
@@ -95,7 +98,6 @@
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
             
-            // Fullscreen listener to toggle clean mode
             document.addEventListener('fullscreenchange', () => {
                 if (document.fullscreenElement) {
                     document.body.classList.add('fullscreen');
@@ -147,23 +149,19 @@
                         }
                     }
                     
-                    // --- NEW: EXTREMITIES TRACKING (Hands & Feet) ---
-                    // Instead of using all motion, we only grab the outermost points
                     if (rawMotion.length > 0) {
                         let topPt = rawMotion[0], bottomPt = rawMotion[0];
                         let leftPt = rawMotion[0], rightPt = rawMotion[0];
                         
                         rawMotion.forEach(p => {
-                            if (p.y < topPt.y) topPt = p;       // Highest point (Head/Hands up)
-                            if (p.y > bottomPt.y) bottomPt = p; // Lowest point (Feet)
-                            if (p.x < leftPt.x) leftPt = p;     // Leftmost point (Left hand)
-                            if (p.x > rightPt.x) rightPt = p;   // Rightmost point (Right hand)
+                            if (p.y < topPt.y) topPt = p;       
+                            if (p.y > bottomPt.y) bottomPt = p; 
+                            if (p.x < leftPt.x) leftPt = p;     
+                            if (p.x > rightPt.x) rightPt = p;   
                         });
                         
-                        // Push only the extremes to our indicators array (deduplicated slightly by rendering)
                         motionPoints.push(topPt, bottomPt, leftPt, rightPt);
 
-                        // Process interactions based *only* on these extremities
                         motionPoints.forEach(pt => {
                             objects.forEach((obj, index) => {
                                 if (!obj) return;
@@ -186,12 +184,11 @@
                                             break;
                                         case 'puddle':
                                             if (obj.cooldown <= 0) {
-                                                // NEW: Colorful Splash when stepped in
-                                                obj.colorHue = Math.floor(Math.random() * 360); // Change to a random bright color
+                                                obj.colorHue = Math.floor(Math.random() * 360); 
                                                 obj.isColorful = true;
                                                 ripples.push({x: obj.x, y: obj.y, radius: 20, life: 1.0, hue: obj.colorHue});
                                                 createSplash(obj.x, obj.y, obj.colorHue);
-                                                obj.cooldown = 30; // Prevent spamming
+                                                obj.cooldown = 30; 
                                             }
                                             break;
                                     }
@@ -201,7 +198,6 @@
                     }
                 }
                 
-                // Cool down puddles
                 objects.forEach(obj => { if (obj && obj.type === 'puddle' && obj.cooldown > 0) obj.cooldown--; });
 
                 lastFrame = new Uint8ClampedArray(current);
@@ -225,7 +221,7 @@
             drawTouchIndicators();
             drawAndUpdateObjects(); 
             drawAndUpdatePops();
-            drawAndUpdateSplashes(); // NEW
+            drawAndUpdateSplashes(); 
             drawAndUpdateRipples(); 
             drawNotifications();
         }
@@ -287,7 +283,6 @@
 
         function updatePuddle(o, floorY) { o.y = floorY; }
         function drawPuddle(o, floorY) {
-            // NEW: Use the puddle's dynamic color hue if stepped in, otherwise clear water blue
             let fillStyle = o.isColorful ? `hsla(${o.colorHue}, 80%, 60%, 0.4)` : 'rgba(100, 180, 255, 0.3)';
             ctx.fillStyle = fillStyle;
             ctx.beginPath();
@@ -301,7 +296,6 @@
                 r.radius += 2.0; r.life -= 0.02;
                 if (r.life <= 0) ripples.splice(i, 1);
                 else {
-                    // NEW: Ripple matches puddle color
                     ctx.strokeStyle = `hsla(${r.hue}, 80%, 60%, ${r.life})`;
                     ctx.lineWidth = 4; ctx.beginPath();
                     ctx.ellipse(r.x, r.y, r.radius, r.radius * 0.3, 0, 0, 2 * Math.PI);
@@ -310,12 +304,11 @@
             }
         }
         
-        // --- NEW: Splash particle generator ---
         function createSplash(x, y, hue) {
-            var numSplashes = Math.floor(Math.random() * 15) + 5; // Random level of splash (5 to 20 drops)
+            var numSplashes = Math.floor(Math.random() * 15) + 5; 
             for (let i = 0; i < numSplashes; i++) {
-                var angle = -Math.PI/2 + (Math.random() - 0.5) * 1.5; // Shoot mostly upwards
-                var speed = Math.random() * 8 + 3; // Random speed
+                var angle = -Math.PI/2 + (Math.random() - 0.5) * 1.5; 
+                var speed = Math.random() * 8 + 3; 
                 splashes.push({
                     x: x, y: y,
                     vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
@@ -324,12 +317,11 @@
             }
         }
         
-        // --- NEW: Update & Draw Splashes ---
         function drawAndUpdateSplashes() {
             for (let i = splashes.length - 1; i >= 0; i--) {
                 let s = splashes[i];
                 s.x += s.vx; s.y += s.vy;
-                s.vy += settings.gravity * 0.8; // Gravity pulls splash down
+                s.vy += settings.gravity * 0.8; 
                 s.life -= 0.03;
                 if (s.life <= 0) splashes.splice(i, 1);
                 else {
@@ -353,7 +345,7 @@
             let newObj = {
                 type: objectType, x: Math.random() * canvas.width,
                 y: Math.random() * floorY * 0.8, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2,
-                radius: Math.random() * 20 + 30, cooldown: 0 // New cooldown property for puddles
+                radius: Math.random() * 20 + 30, cooldown: 0 
             };
 
             switch(objectType) {
@@ -367,9 +359,10 @@
                     break;
                 case 'puddle':
                     newObj.y = floorY; 
-                    newObj.radius = Math.random() * 40 + 50; // slightly larger puddles
+                    // MODIFIED: Radius is now massive, driven by the settings UI!
+                    newObj.radius = Math.random() * 40 + settings.puddleSize; 
                     newObj.isColorful = false; 
-                    newObj.colorHue = 210; // Default water blue
+                    newObj.colorHue = 210; 
                     break;
             }
             return newObj;
@@ -407,7 +400,6 @@
         }
         
         function drawNotifications() { 
-             // MODIFIED: Do not draw notifications if we are in clean fullscreen mode
              if (document.fullscreenElement) return; 
              
              if (modeNotification.life > 0) {
